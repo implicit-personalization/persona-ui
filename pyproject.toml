@@ -7,21 +7,16 @@ requires-python = ">=3.10"
 dependencies = [
     "persona-vectors",
     "persona-data",
-    "nnterp>=1.3.0",
     "streamlit>=1.44.0",
     "plotly>=6.6.0",
-    "kaleido>=1.0.0",
     "python-dotenv>=1.2.2",
-    "torch>=2.10.0",
-    "transformers>=5.2.0",
 ]
 
 [tool.uv.sources]
-# NOTE: Switch to git sources after pushing the new package structure
-persona-vectors = { git = "ssh://git@github.com/implicit-personalization/persona-vectors.git" }
-persona-data = { git = "ssh://git@github.com/implicit-personalization/persona-data.git" }
-# persona-vectors = { path = "../persona-vectors", editable = true }
-# persona-data = { path = "../persona-data", editable = true }
+persona-vectors = { path = "../persona-vectors", editable = true }
+persona-data = { path = "../persona-data", editable = true }
+# persona-vectors = { git = "ssh://git@github.com/implicit-personalization/persona-vectors.git" }  # use for release
+# persona-data = { git = "ssh://git@github.com/implicit-personalization/persona-data.git" }  # use for release
 
 # [build-system]
 # requires = ["uv_build>=0.11.3,<0.12"]

@@ -45,6 +45,26 @@ uv sync
 cp .env.example .env
 ```
 
+## Local Setup Note
+
+For now, `persona-data` and `persona-vectors` need to be checked out in the parent directory of `persona-ui`.
+
+Example:
+
+```bash
+git clone <persona-data-url> ../persona-data
+git clone <persona-vectors-url> ../persona-vectors
+```
+
+Expected layout:
+
+```text
+parent/
+├── persona-ui
+├── persona-data
+└── persona-vectors
+```
+
 ## Quickstart
 
 ```bash

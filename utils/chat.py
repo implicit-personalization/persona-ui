@@ -10,14 +10,13 @@ logger = logging.getLogger(__name__)
 
 from persona_data.synth_persona import PersonaData
 from persona_data.prompts import (
+    format_empty_persona_prompt,
     format_biography_prompt,
     format_templated_prompt,
     normalize_messages,
 )
 
 SystemPromptMode = Literal["empty", "templated", "biography", "custom"]
-
-_CUSTOM_PROMPT_DEFAULT = "You are a helpful assistant."
 
 
 @dataclass
@@ -45,12 +44,14 @@ def resolve_system_prompt(
     if persona is None:
         return ""
 
+    if mode == "empty":
+        return ""
     if mode == "templated":
         return format_templated_prompt(persona.templated_prompt)
     if mode == "biography":
         return format_biography_prompt(persona.biography_md)
     if mode == "custom":
-        return _CUSTOM_PROMPT_DEFAULT
+        return format_empty_persona_prompt()
     return ""
 
 
