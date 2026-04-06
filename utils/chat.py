@@ -8,13 +8,13 @@ from nnterp import StandardizedTransformer
 
 logger = logging.getLogger(__name__)
 
-from persona_data.synth_persona import PersonaData
 from persona_data.prompts import (
-    format_empty_persona_prompt,
     format_biography_prompt,
+    format_empty_persona_prompt,
     format_templated_prompt,
     normalize_messages,
 )
+from persona_data.synth_persona import PersonaData
 
 SystemPromptMode = Literal["empty", "templated", "biography", "custom"]
 

@@ -5,10 +5,10 @@ from tempfile import mkdtemp
 from typing import Any
 
 import streamlit as st
+from persona_data.synth_persona import PersonaDataset as LocalPersonaDataset
 from persona_data.synth_persona import SynthPersonaDataset
 
 from .helpers import DATASET_SOURCES
-from .local_dataset import LocalPersonaDataset
 
 
 @st.cache_resource(show_spinner=False)

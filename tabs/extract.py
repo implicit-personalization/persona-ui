@@ -1,7 +1,7 @@
 import streamlit as st
+from persona_vectors.extraction import run_extraction
 
 from utils.datasets import load_dataset
-from utils.extraction import run_extraction
 from utils.helpers import (
     PROMPT_VARIANTS,
     persona_label,
@@ -151,6 +151,16 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
     status_box = st.empty()
     status_box.info("Extraction in progress...")
     progress = st.progress(0, text="Preparing extraction...")
+    ndif_status_box = st.empty()  # shows live NDIF job status when remote=True
+
+    _STATUS_ICONS = {
+        "RECEIVED": "◉", "QUEUED": "◎", "DISPATCHED": "◈",
+        "RUNNING": "●", "COMPLETED": "✓", "ERROR": "✗",
+    }
+
+    def _on_ndif_status(job_id: str, status_name: str, description: str) -> None:
+        icon = _STATUS_ICONS.get(status_name, "•")
+        ndif_status_box.caption(f"{icon} `{job_id}` **{status_name}** — {description}")
 
     with st.spinner("Loading model..."):
         model = cached_model(model_name=model_name, remote=remote)
@@ -174,6 +184,7 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
                     qa_pairs=qa_pairs,
                     variants=[variant],
                     remote=remote,
+                    on_status=_on_ndif_status if remote else None,
                 )
                 results.extend(variant_results)
                 step += 1
@@ -184,6 +195,7 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         return
     finally:
         progress.empty()
+        ndif_status_box.empty()
 
     status_box.success("Extraction complete")
     st.success(f"Saved {len(results)} artifact set(s)")
@@ -191,5 +203,5 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
     for result in results:
         st.markdown(
             f"- **{result.persona_name}** · {prompt_variant_label(result.variant)}: "
-            f"{result.n_questions} questions, {result.n_layers} layers, {result.d_model} hidden size"
+            f"{result.n_questions} questions"
         )

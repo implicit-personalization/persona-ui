@@ -7,15 +7,10 @@ import torch
 from persona_vectors.activation_io import (
     load_activation_metadata,
     load_per_question_vectors,
+    model_dir_name,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def model_dir_name(model_name: str) -> str:
-    """Encode a model name for use in artifact paths."""
-
-    return model_name.replace("/", "__")
 
 
 def list_available_personas(

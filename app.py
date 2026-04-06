@@ -1,14 +1,11 @@
 import os
-from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
 
-# Load .env early so DEFAULT_MODEL / REMOTE_DEFAULT_MODEL can be overridden via env
-load_dotenv(Path(__file__).parent / ".env")
-
 from utils.helpers import DATASET_SOURCES
 
+load_dotenv()
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "google/gemma-2-2b-it")
 REMOTE_DEFAULT_MODEL = os.environ.get("REMOTE_DEFAULT_MODEL", "google/gemma-2-9b-it")
 

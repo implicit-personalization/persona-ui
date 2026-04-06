@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from persona_data.environment import get_artifacts_dir
+from persona_vectors.activation_io import model_dir_name
 
-from utils.artifacts import model_dir_name
 from utils.helpers import slugify
 
 
