@@ -52,7 +52,6 @@ def resolve_system_prompt(
         return format_biography_prompt(persona.biography_md)
     if mode == "custom":
         return format_empty_persona_prompt()
-    return ""
 
 
 def _format_plain_messages(

@@ -24,13 +24,10 @@ persona-ui/
 │   ├── compare.py           # Activation comparison tab
 │   └── extract.py           # Extraction tab
 └── utils/
-    ├── artifacts.py         # Load saved activations metadata
     ├── chat.py              # Chat generation logic
     ├── chat_export.py       # Export chat logs to JSON
     ├── datasets.py          # Dataset loader wrapper
-    ├── extraction.py        # Extraction orchestration
     ├── helpers.py           # UI labels and slug helpers
-    ├── local_dataset.py     # Local JSONL dataset parsing
     └── runtime.py           # Model caching and NDIF queries
 ```
 
@@ -81,7 +78,7 @@ HF_HOME=...            # Optional: HuggingFace cache directory
 ARTIFACTS_DIR=...      # Optional: where activations are read from (default: ./artifacts)
 ```
 
-The app picks up this file automatically via `load_env()` on startup.
+The app picks up this file automatically via `load_dotenv()` on startup.
 
 ## Saved Artifacts
 

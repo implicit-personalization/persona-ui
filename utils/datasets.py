@@ -1,4 +1,5 @@
 import atexit
+import hashlib
 import shutil
 from pathlib import Path
 from tempfile import mkdtemp
@@ -31,10 +32,13 @@ def _upload_cache_dir() -> Path:
 def _uploaded_file_to_temp_path(uploaded_file: Any, stem: str) -> Path:
     suffix = Path(uploaded_file.name).suffix or ".jsonl"
     temp_path = _upload_cache_dir() / f"{stem}{suffix}"
+    hash_path = temp_path.with_suffix(temp_path.suffix + ".sha256")
     data = uploaded_file.getvalue()
-    if temp_path.exists() and temp_path.stat().st_size == len(data):
+    digest = hashlib.sha256(data).hexdigest()
+    if temp_path.exists() and hash_path.exists() and hash_path.read_text() == digest:
         return temp_path
     temp_path.write_bytes(data)
+    hash_path.write_text(digest)
     return temp_path
 
 

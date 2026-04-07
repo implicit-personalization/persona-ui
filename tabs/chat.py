@@ -1,10 +1,15 @@
-import threading
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
+from typing import Any
 
 import streamlit as st
+from persona_data.synth_persona import PersonaData
 
-from state import chat_session_key, get_chat_state, reset_chat_state
+from state import (
+    _default_chat_state,
+    chat_session_key,
+    get_chat_state,
+    reset_chat_state,
+)
 from utils.chat import ChatReply, generate_chat_reply, resolve_system_prompt
 from utils.chat_export import save_chat_export
 from utils.datasets import load_dataset
@@ -12,13 +17,11 @@ from utils.helpers import (
     MODE_LABEL_TO_KEY,
     MODE_LABELS,
     VARIANT_LABELS,
+    VISIBLE_MESSAGE_COUNT,
     persona_label,
     widget_key,
 )
 from utils.runtime import cached_model
-
-_VISIBLE_MESSAGE_COUNT = 5
-_model_lock = threading.Lock()
 
 
 def _render_chat_message(message: dict[str, str]) -> None:
@@ -31,6 +34,21 @@ def _render_chat_message(message: dict[str, str]) -> None:
 def _clear_chat_ui_state(*keys: str) -> None:
     for key in keys:
         st.session_state.pop(key, None)
+
+
+def _reset_single_chat_context(
+    model_name: str,
+    remote: bool,
+    dataset_source: str,
+    chat_state: dict[str, object],
+    persona_id: str,
+    prompt_mode: str,
+    *ui_keys: str,
+) -> None:
+    reset_chat_state(model_name, remote, dataset_source)
+    chat_state["persona_id"] = persona_id
+    chat_state["prompt_mode"] = prompt_mode
+    _clear_chat_ui_state(*ui_keys)
 
 
 def _generation_dict(gen_kwargs: dict, advanced_generation: bool) -> dict[str, object]:
@@ -46,186 +64,146 @@ def _generation_dict(gen_kwargs: dict, advanced_generation: bool) -> dict[str, o
     }
 
 
-# ── Compare mode helpers ───────────────────────────────────────────────────────
+def _render_persona_prompt_controls(
+    personas: list[PersonaData],
+    current_persona_id: str | None,
+    current_prompt_mode: str,
+    persona_key: str,
+    prompt_key: str,
+    column_widths: tuple[int, int] = (3, 2),
+) -> tuple[PersonaData, str, bool]:
+    """Render persona and prompt selectors, returning the selected values."""
 
-
-def _panel_state(panel_key: str) -> dict:
-    """Get or initialise compare-panel chat state stored in session_state."""
-    if panel_key not in st.session_state:
-        st.session_state[panel_key] = {
-            "messages": [],
-            "persona_id": None,
-            "prompt_mode": "templated",
-            "past_key_values": None,
-        }
-    return st.session_state[panel_key]
-
-
-def _render_compare_panel(
-    side: str,
-    context_key: str,
-    personas: list,
-    remote: bool,
-    model_name: str,
-    dataset_source: str,
-    gen_kwargs: dict,
-    advanced_generation: bool,
-) -> dict:
-    """Render persona/prompt controls + chat log for one compare panel.
-
-    Returns a dict with keys needed by the generation step:
-      panel_key, state, active_system_prompt, selected_persona, chat_log
-    """
-    panel_key = widget_key(context_key, f"cmp_{side}")
-    state = _panel_state(panel_key)
-
-    # ── Per-panel selectors ──────────────────────────────────────────────────
-    p_col, m_col = st.columns([3, 2])
+    p_col, m_col = st.columns(list(column_widths))
     with p_col:
         selected_index = next(
-            (i for i, p in enumerate(personas) if p.id == state["persona_id"]), 0
+            (i for i, p in enumerate(personas) if p.id == current_persona_id), 0
         )
         selected_persona = st.selectbox(
             "Persona",
             options=personas,
             index=selected_index,
             format_func=persona_label,
-            key=widget_key(panel_key, "persona"),
+            key=persona_key,
         )
     with m_col:
-        current_label = VARIANT_LABELS.get(state["prompt_mode"], "None")
+        current_label = VARIANT_LABELS.get(current_prompt_mode, "None")
         prompt_mode_label = st.selectbox(
             "Prompt",
             options=MODE_LABELS,
             index=MODE_LABELS.index(current_label),
-            key=widget_key(panel_key, "prompt_mode"),
+            key=prompt_key,
         )
     prompt_mode = MODE_LABEL_TO_KEY[prompt_mode_label]
-
-    # Reset state when persona or mode changes.
     changed = (
-        state["persona_id"] != selected_persona.id
-        or state["prompt_mode"] != prompt_mode
+        current_persona_id != selected_persona.id or current_prompt_mode != prompt_mode
     )
-    if changed:
-        state["messages"] = []
-        state["past_key_values"] = None
-        state["persona_id"] = selected_persona.id
-        state["prompt_mode"] = prompt_mode
-        _clear_chat_ui_state(
-            widget_key(panel_key, "custom_prompt"),
-            widget_key(panel_key, "show_all"),
+    return selected_persona, prompt_mode, changed
+
+
+def _render_system_prompt_editor(
+    prompt_key: str,
+    prompt_mode: str,
+    active_system_prompt: str | None,
+    *,
+    height: int,
+    label: str = "Prompt",
+) -> str | None:
+    """Render the editable system prompt area for a chat panel."""
+
+    if prompt_mode == "empty":
+        return active_system_prompt
+
+    if prompt_key not in st.session_state:
+        st.session_state[prompt_key] = active_system_prompt or ""
+
+    with st.expander("Edit prompt", expanded=False):
+        edited_prompt = (
+            st.text_area(
+                label,
+                key=prompt_key,
+                height=height,
+                label_visibility="collapsed",
+            )
+            or None
         )
+    return edited_prompt
 
-    # ── System prompt ────────────────────────────────────────────────────────
-    active_system_prompt = resolve_system_prompt(
-        persona=selected_persona, mode=prompt_mode
-    )
-    custom_prompt_key = widget_key(panel_key, "custom_prompt")
-    if prompt_mode != "empty":
-        if custom_prompt_key not in st.session_state:
-            st.session_state[custom_prompt_key] = active_system_prompt
-        with st.expander("Edit prompt", expanded=False):
-            active_system_prompt = (
-                st.text_area(
-                    "prompt",
-                    key=custom_prompt_key,
-                    height=150,
-                    label_visibility="collapsed",
-                )
-                or None
-            )
 
-    export_success_message: str | None = None
-    action_col1, action_col2 = st.columns(2)
-    with action_col1:
-        if st.button(
-            "Export chat",
-            key=widget_key(panel_key, "export_chat"),
-            use_container_width=True,
-        ):
-            export_path = save_chat_export(
-                model_name=model_name,
-                dataset_source=dataset_source,
-                persona_id=selected_persona.id,
-                persona_name=getattr(selected_persona, "name", None),
-                panel_label=side,
-                prompt_mode=prompt_mode,
-                system_prompt=active_system_prompt,
-                messages=state["messages"],
-                generation=_generation_dict(gen_kwargs, advanced_generation),
-            )
-            export_success_message = f"Saved chat export to {export_path}"
-    with action_col2:
-        if st.button(
-            "Reset chat",
-            key=widget_key(panel_key, "reset"),
-            use_container_width=True,
-            type="secondary",
-        ):
-            state["messages"] = []
-            state["past_key_values"] = None
-            _clear_chat_ui_state(
-                widget_key(panel_key, "custom_prompt"),
-                widget_key(panel_key, "show_all"),
-            )
-            st.rerun()
+def _render_chat_window(
+    *,
+    chat_log: Any,
+    messages: list[dict[str, str]],
+    show_all_key: str,
+    show_all_btn_key: str,
+    show_earlier_label: str,
+) -> Any:
+    """Render the visible chat history inside one container."""
 
-    if export_success_message:
-        st.success(export_success_message)
-
-    # ── Message history ──────────────────────────────────────────────────────
-    show_all_key = widget_key(panel_key, "show_all")
-    messages = state["messages"]
-    if len(messages) > _VISIBLE_MESSAGE_COUNT and not st.session_state.get(
-        show_all_key, False
-    ):
-        hidden_count = len(messages) - _VISIBLE_MESSAGE_COUNT
-        if st.button(
-            f"Show earlier ({hidden_count} hidden)",
-            key=widget_key(panel_key, "show_all_btn"),
-        ):
-            st.session_state[show_all_key] = True
-            st.rerun()
-        visible = messages[-_VISIBLE_MESSAGE_COUNT:]
-    else:
-        visible = messages
-
-    chat_log = st.container()
     with chat_log:
-        for msg in visible:
-            _render_chat_message(msg)
+        if len(messages) > VISIBLE_MESSAGE_COUNT and not st.session_state.get(
+            show_all_key, False
+        ):
+            hidden_count = len(messages) - VISIBLE_MESSAGE_COUNT
+            if st.button(
+                f"{show_earlier_label} ({hidden_count} hidden)",
+                key=show_all_btn_key,
+            ):
+                st.session_state[show_all_key] = True
+                st.rerun()
+            visible_messages = messages[-VISIBLE_MESSAGE_COUNT:]
+        else:
+            visible_messages = messages
 
-    return {
-        "panel_key": panel_key,
-        "state": state,
-        "active_system_prompt": active_system_prompt,
-        "selected_persona": selected_persona,
-        "chat_log": chat_log,
-    }
+        for message in visible_messages:
+            _render_chat_message(message)
+
+    return chat_log
 
 
-def _generate_for_panel(
-    panel: dict,
-    model,
-    remote: bool,
-    gen_kwargs: dict,
-) -> ChatReply:
-    """Run generate_chat_reply for one compare panel. Thread-safe."""
-    messages = []
-    if panel["active_system_prompt"]:
-        messages.append({"role": "system", "content": panel["active_system_prompt"]})
-    messages.extend(panel["state"]["messages"])
+def _build_chat_messages(
+    system_prompt: str | None,
+    messages: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    return (
+        [{"role": "system", "content": system_prompt}] if system_prompt else []
+    ) + messages
 
-    ctx = nullcontext() if remote else _model_lock
-    with ctx:
-        return generate_chat_reply(
-            model=model,
-            messages=messages,
-            remote=remote,
-            past_key_values=panel["state"]["past_key_values"],
-            **gen_kwargs,
-        )
+
+def _save_chat_export_message(
+    *,
+    model_name: str,
+    dataset_source: str,
+    persona_id: str,
+    persona_name: str | None,
+    prompt_mode: str,
+    system_prompt: str | None,
+    messages: list[dict[str, str]],
+    generation: dict[str, object],
+    panel_label: str | None = None,
+) -> str:
+    export_path = save_chat_export(
+        model_name=model_name,
+        dataset_source=dataset_source,
+        persona_id=persona_id,
+        persona_name=persona_name,
+        panel_label=panel_label,
+        prompt_mode=prompt_mode,
+        system_prompt=system_prompt,
+        messages=messages,
+        generation=generation,
+    )
+    return f"Saved chat export to {export_path}"
+
+
+# ── Compare mode helpers ───────────────────────────────────────────────────────
+
+
+def _panel_state(panel_key: str) -> dict:
+    """Get or initialise compare-panel chat state stored in session_state."""
+    if panel_key not in st.session_state:
+        st.session_state[panel_key] = _default_chat_state()
+    return st.session_state[panel_key]
 
 
 def _render_compare_mode(
@@ -233,35 +211,90 @@ def _render_compare_mode(
     model_name: str,
     context_key: str,
     dataset_source: str,
-    personas: list,
+    personas: list[PersonaData],
     gen_kwargs: dict,
     advanced_generation: bool,
 ) -> None:
     """Render the full side-by-side comparison UI."""
     left_col, right_col = st.columns(2)
 
+    def render_panel(side: str, column) -> tuple[dict[str, object], Any, str | None]:
+        panel_key = widget_key(context_key, f"cmp_{side}")
+        state = st.session_state.get(panel_key)
+        if state is None:
+            state = _default_chat_state()
+            st.session_state[panel_key] = state
+        prompt_key = widget_key(panel_key, "custom_prompt")
+        show_all_key = widget_key(panel_key, "show_all")
+
+        selected_persona, prompt_mode, changed = _render_persona_prompt_controls(
+            personas,
+            state["persona_id"],
+            state["prompt_mode"],
+            widget_key(panel_key, "persona"),
+            widget_key(panel_key, "prompt_mode"),
+        )
+        if changed:
+            state["messages"] = []
+            state["past_key_values"] = None
+            state["persona_id"] = selected_persona.id
+            state["prompt_mode"] = prompt_mode
+            _clear_chat_ui_state(prompt_key, show_all_key)
+
+        active_system_prompt = resolve_system_prompt(
+            persona=selected_persona, mode=prompt_mode
+        )
+        active_system_prompt = _render_system_prompt_editor(
+            prompt_key,
+            prompt_mode,
+            active_system_prompt,
+            height=150,
+        )
+
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button(
+                "Export chat", key=widget_key(panel_key, "export_chat"), width="stretch"
+            ):
+                st.success(
+                    _save_chat_export_message(
+                        model_name=model_name,
+                        dataset_source=dataset_source,
+                        persona_id=selected_persona.id,
+                        persona_name=getattr(selected_persona, "name", None),
+                        prompt_mode=prompt_mode,
+                        system_prompt=active_system_prompt,
+                        messages=state["messages"],
+                        generation=_generation_dict(gen_kwargs, advanced_generation),
+                        panel_label=side,
+                    )
+                )
+        with btn_col2:
+            if st.button(
+                "Reset chat",
+                key=widget_key(panel_key, "reset"),
+                width="stretch",
+                type="secondary",
+            ):
+                state["messages"] = []
+                state["past_key_values"] = None
+                _clear_chat_ui_state(prompt_key, show_all_key)
+                st.rerun()
+
+        chat_log = st.container()
+        _render_chat_window(
+            chat_log=chat_log,
+            messages=state["messages"],
+            show_all_key=show_all_key,
+            show_all_btn_key=widget_key(panel_key, "show_all_btn"),
+            show_earlier_label="Show earlier",
+        )
+        return state, chat_log, active_system_prompt
+
     with left_col:
-        left = _render_compare_panel(
-            "left",
-            context_key,
-            personas,
-            remote,
-            model_name,
-            dataset_source,
-            gen_kwargs,
-            advanced_generation,
-        )
+        left_state, left_log, left_prompt = render_panel("left", left_col)
     with right_col:
-        right = _render_compare_panel(
-            "right",
-            context_key,
-            personas,
-            remote,
-            model_name,
-            dataset_source,
-            gen_kwargs,
-            advanced_generation,
-        )
+        right_state, right_log, right_prompt = render_panel("right", right_col)
 
     user_prompt = st.chat_input(
         "Ask both...",
@@ -271,43 +304,73 @@ def _render_compare_mode(
         return
 
     model = cached_model(model_name=model_name, remote=remote)
-    panels = [(left, left_col), (right, right_col)]
+    panels = [
+        (left_state, left_log, left_prompt),
+        (right_state, right_log, right_prompt),
+    ]
 
-    for panel, col in panels:
-        panel["state"]["messages"].append({"role": "user", "content": user_prompt})
-        with col:
-            with panel["chat_log"]:
-                _render_chat_message({"role": "user", "content": user_prompt})
+    for panel_state, panel_log, _panel_prompt in panels:
+        panel_state["messages"].append({"role": "user", "content": user_prompt})
+        with panel_log:
+            _render_chat_message({"role": "user", "content": user_prompt})
 
-    # Generate both responses in parallel (remote: truly concurrent; local: serialised via lock).
     with st.spinner("Generating..."):
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [
-                executor.submit(_generate_for_panel, panel, model, remote, gen_kwargs)
-                for panel, col in panels
-            ]
+        if remote:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [
+                    executor.submit(
+                        generate_chat_reply,
+                        model=model,
+                        messages=(
+                            [{"role": "system", "content": panel_prompt}]
+                            if panel_prompt
+                            else []
+                        )
+                        + panel_state["messages"],
+                        remote=remote,
+                        past_key_values=panel_state["past_key_values"],
+                        **gen_kwargs,
+                    )
+                    for panel_state, _panel_log, panel_prompt in panels
+                ]
+                results: list[ChatReply | Exception] = []
+                for future in futures:
+                    try:
+                        results.append(future.result())
+                    except Exception as exc:
+                        results.append(exc)
+        else:
             results = []
-            for future in futures:
+            for panel_state, _panel_log, panel_prompt in panels:
                 try:
-                    results.append(future.result())
+                    results.append(
+                        generate_chat_reply(
+                            model=model,
+                            messages=(
+                                [{"role": "system", "content": panel_prompt}]
+                                if panel_prompt
+                                else []
+                            )
+                            + panel_state["messages"],
+                            remote=remote,
+                            past_key_values=panel_state["past_key_values"],
+                            **gen_kwargs,
+                        )
+                    )
                 except Exception as exc:
                     results.append(exc)
 
-    for (panel, col), result in zip(panels, results):
+    for (panel_state, panel_log, _panel_prompt), result in zip(panels, results):
         if isinstance(result, Exception):
-            with col:
-                with panel["chat_log"]:
-                    st.error(f"Generation failed: {result}")
-            panel["state"]["messages"].pop()
+            with panel_log:
+                st.error(f"Generation failed: {result}")
+            panel_state["messages"].pop()
             continue
 
-        panel["state"]["messages"].append({"role": "assistant", "content": result.text})
-        panel["state"]["past_key_values"] = (
-            result.past_key_values if not remote else None
-        )
-        with col:
-            with panel["chat_log"]:
-                _render_chat_message({"role": "assistant", "content": result.text})
+        panel_state["messages"].append({"role": "assistant", "content": result.text})
+        panel_state["past_key_values"] = result.past_key_values if not remote else None
+        with panel_log:
+            _render_chat_message({"role": "assistant", "content": result.text})
 
 
 # ── Main tab entry point ───────────────────────────────────────────────────────
@@ -465,6 +528,12 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     # ── Single-chat mode ──────────────────────────────────────────────────────
     persona_select_key = widget_key(context_key, "persona_select")
     prompt_mode_select_key = widget_key(context_key, "system_prompt_select")
+    prompt_key = widget_key(context_key, "custom_system_prompt")
+    show_all_key = widget_key(context_key, "show_all_messages")
+    chat_input_key = widget_key(context_key, "chat_input")
+    pending_key = widget_key(context_key, "pending_prompt")
+    export_key = widget_key(context_key, "export_chat")
+    reset_key = widget_key(context_key, "reset")
 
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -481,52 +550,18 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         )
     with col2:
         current_mode_label = VARIANT_LABELS.get(chat_state["prompt_mode"], "None")
-        prompt_mode_label = st.selectbox(
+        st.selectbox(
             "Prompt",
             options=MODE_LABELS,
             index=MODE_LABELS.index(current_mode_label),
             key=prompt_mode_select_key,
         )
-        prompt_mode = MODE_LABEL_TO_KEY[prompt_mode_label]
+        prompt_mode = MODE_LABEL_TO_KEY[st.session_state[prompt_mode_select_key]]
 
     active_system_prompt = resolve_system_prompt(
         persona=selected_persona,
         mode=prompt_mode,
     )
-
-    chat_input_key = widget_key(context_key, "chat_input")
-    show_all_key = widget_key(context_key, "show_all_messages")
-    custom_prompt_key = widget_key(context_key, "custom_system_prompt")
-    pending_key = widget_key(context_key, "pending_prompt")
-    export_success_message: str | None = None
-
-    action_col1, action_col2 = st.columns(2)
-    with action_col1:
-        if st.button("Reset chat", use_container_width=True, type="secondary"):
-            reset_chat_state(model_name, remote, dataset_source)
-            _clear_chat_ui_state(
-                chat_input_key,
-                show_all_key,
-                custom_prompt_key,
-                pending_key,
-            )
-            st.rerun()
-    with action_col2:
-        if st.button("Export chat", use_container_width=True):
-            export_path = save_chat_export(
-                model_name=model_name,
-                dataset_source=dataset_source,
-                persona_id=selected_persona.id,
-                persona_name=getattr(selected_persona, "name", None),
-                prompt_mode=prompt_mode,
-                system_prompt=active_system_prompt,
-                messages=chat_state["messages"],
-                generation=_generation_dict(gen_kwargs, advanced_generation),
-            )
-            export_success_message = f"Saved chat export to {export_path}"
-
-    if export_success_message:
-        st.success(export_success_message)
 
     changed_context = (
         chat_state["persona_id"] != selected_persona.id
@@ -534,13 +569,16 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     )
     if changed_context:
         had_history = bool(chat_state["messages"])
-        chat_state["persona_id"] = selected_persona.id
-        chat_state["prompt_mode"] = prompt_mode
-        reset_chat_state(model_name, remote, dataset_source)
-        _clear_chat_ui_state(
+        _reset_single_chat_context(
+            model_name,
+            remote,
+            dataset_source,
+            chat_state,
+            selected_persona.id,
+            prompt_mode,
             chat_input_key,
             show_all_key,
-            custom_prompt_key,
+            prompt_key,
             pending_key,
         )
         if had_history:
@@ -548,40 +586,51 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
 
     chat_log = st.container()
 
-    with chat_log:
-        # System prompt as first item in conversation — collapsed by default, editable.
-        if prompt_mode != "empty":
-            if custom_prompt_key not in st.session_state:
-                st.session_state[custom_prompt_key] = active_system_prompt
-            with st.expander("Edit prompt", expanded=False):
-                active_system_prompt = (
-                    st.text_area(
-                        "Prompt",
-                        key=custom_prompt_key,
-                        height=200,
-                        label_visibility="collapsed",
-                    )
-                    or None
+    active_system_prompt = _render_system_prompt_editor(
+        prompt_key,
+        prompt_mode,
+        active_system_prompt,
+        height=200,
+    )
+
+    action_col1, action_col2 = st.columns(2)
+    with action_col1:
+        if st.button("Export chat", key=export_key, width="stretch"):
+            st.success(
+                _save_chat_export_message(
+                    model_name=model_name,
+                    dataset_source=dataset_source,
+                    persona_id=selected_persona.id,
+                    persona_name=getattr(selected_persona, "name", None),
+                    prompt_mode=prompt_mode,
+                    system_prompt=active_system_prompt,
+                    messages=chat_state["messages"],
+                    generation=_generation_dict(gen_kwargs, advanced_generation),
                 )
+            )
+    with action_col2:
+        if st.button("Reset chat", key=reset_key, width="stretch", type="secondary"):
+            _reset_single_chat_context(
+                model_name,
+                remote,
+                dataset_source,
+                chat_state,
+                selected_persona.id,
+                prompt_mode,
+                chat_input_key,
+                show_all_key,
+                prompt_key,
+                pending_key,
+            )
+            st.rerun()
 
-        # Collapse older messages, show only the most recent ones.
-        messages = chat_state["messages"]
-        if len(messages) > _VISIBLE_MESSAGE_COUNT and not st.session_state.get(
-            show_all_key, False
-        ):
-            hidden_count = len(messages) - _VISIBLE_MESSAGE_COUNT
-            if st.button(
-                f"Show earlier messages ({hidden_count} hidden)",
-                key=widget_key(context_key, "show_all_btn"),
-            ):
-                st.session_state[show_all_key] = True
-                st.rerun()
-            visible_messages = messages[-_VISIBLE_MESSAGE_COUNT:]
-        else:
-            visible_messages = messages
-
-        for message in visible_messages:
-            _render_chat_message(message)
+    _render_chat_window(
+        chat_log=chat_log,
+        messages=chat_state["messages"],
+        show_all_key=show_all_key,
+        show_all_btn_key=widget_key(context_key, "show_all_btn"),
+        show_earlier_label="Show earlier messages",
+    )
 
     user_prompt = st.chat_input(
         "Ask something...",
@@ -598,10 +647,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     if not st.session_state.pop(pending_key, False):
         return
 
-    messages = []
-    if active_system_prompt:
-        messages.append({"role": "system", "content": active_system_prompt})
-    messages.extend(chat_state["messages"])
+    messages = _build_chat_messages(active_system_prompt, chat_state["messages"])
 
     with st.spinner("Generating reply..."):
         model = cached_model(model_name=model_name, remote=remote)

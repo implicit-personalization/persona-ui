@@ -1,5 +1,7 @@
+import re
+
 from persona_data.synth_persona import PersonaData
-from persona_vectors.extraction import SUPPORTED_VARIANTS
+from persona_vectors.artifacts import SUPPORTED_VARIANTS
 
 # Variant key -> human-readable label mapping
 VARIANT_LABELS = {
@@ -18,13 +20,10 @@ MODE_LABELS = list(VARIANT_LABELS.values())
 # Reverse lookup: label -> key
 MODE_LABEL_TO_KEY = {v: k for k, v in VARIANT_LABELS.items()}
 
+VISIBLE_MESSAGE_COUNT = 5
+
 DATASET_SOURCES = ["HuggingFace: synth-persona", "Local JSONL upload"]
 ANALYSIS_MODES = ["Cosine similarity", "PCA", "UMAP"]
-
-ANALYSIS_LABELS = {
-    "PCA": ("PCA", "PC1", "PC2"),
-    "UMAP": ("UMAP", "UMAP 1", "UMAP 2"),
-}
 
 ANALYSIS_HELP_TEXT = {
     "Cosine similarity": "Compare layer-wise alignment between variants.",
@@ -32,11 +31,18 @@ ANALYSIS_HELP_TEXT = {
     "UMAP": "Project the selected layers into a local-neighborhood 2D view.",
 }
 
+NDIF_STATUS_ICONS = {
+    "RECEIVED": "◉",
+    "QUEUED": "◎",
+    "DISPATCHED": "◈",
+    "RUNNING": "●",
+    "COMPLETED": "✓",
+    "ERROR": "✗",
+}
+
 
 def slugify(value: str) -> str:
-    """Convert a string to a slug safe for filenames and URLs."""
-
-    import re
+    """Convert a string to a filesystem-safe slug."""
 
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") or "unknown"
 

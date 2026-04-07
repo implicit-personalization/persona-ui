@@ -26,7 +26,7 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
             if st.button(
                 tab_name,
                 key=f"sidebar__tab__{tab_name.lower()}",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if is_selected else "secondary",
                 icon=icon,
             ):

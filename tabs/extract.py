@@ -3,6 +3,7 @@ from persona_vectors.extraction import run_extraction
 
 from utils.datasets import load_dataset
 from utils.helpers import (
+    NDIF_STATUS_ICONS,
     PROMPT_VARIANTS,
     persona_label,
     prompt_variant_label,
@@ -84,8 +85,8 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         st.info("Select at least one persona.")
         return
 
-    qa_filter_type: str | None
-    qa_filter_difficulty: list[int] | None
+    runs = None
+    max_questions = 0
 
     with st.expander("Advanced", expanded=False):
         st.caption("Filters")
@@ -114,35 +115,38 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
             )
             qa_filter_difficulty = difficulty_values if difficulty_values else None
 
-        # Pre-load QA pairs for all selected personas to validate filters and set slider range.
-        qa_by_persona = {
-            p.id: dataset.get_qa(
-                p.id, type=qa_filter_type, difficulty=qa_filter_difficulty
+        runs, skipped = [], []
+        for persona in selected_personas:
+            qa = list(
+                dataset.get_qa(
+                    persona.id, type=qa_filter_type, difficulty=qa_filter_difficulty
+                )
             )
-            for p in selected_personas
-        }
-        personas_without_qa = [p for p in selected_personas if not qa_by_persona[p.id]]
-        if personas_without_qa:
-            names = ", ".join(p.name for p in personas_without_qa)
+            if qa:
+                runs.append((persona, qa))
+            else:
+                skipped.append(persona)
+        if skipped:
+            names = ", ".join(p.name for p in skipped)
             st.warning(f"No QA pairs match filters for: {names}. They will be skipped.")
 
-        personas_to_run = [p for p in selected_personas if qa_by_persona[p.id]]
-        if not personas_to_run:
+        if not runs:
             st.info("No personas have matching QA pairs. Widen the filters.")
             return
 
-        min_qa_count = min(len(qa_by_persona[p.id]) for p in personas_to_run)
+        max_q = min(len(qa_pairs) for _, qa_pairs in runs)
+        max_questions = st.slider(
+            "Max questions",
+            min_value=1,
+            max_value=max_q,
+            value=max_q,
+            key=_extract_widget_key(
+                model_name, remote, dataset_source, "max_questions"
+            ),
+        )
 
-        with col3:
-            max_questions = st.slider(
-                "Max questions",
-                min_value=1,
-                max_value=min_qa_count,
-                value=min_qa_count,
-                key=_extract_widget_key(
-                    model_name, remote, dataset_source, "max_questions"
-                ),
-            )
+    if runs is None:
+        return
 
     run_clicked = st.button("Run extraction", type="primary")
     if not run_clicked:
@@ -153,25 +157,19 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
     progress = st.progress(0, text="Preparing extraction...")
     ndif_status_box = st.empty()  # shows live NDIF job status when remote=True
 
-    _STATUS_ICONS = {
-        "RECEIVED": "◉", "QUEUED": "◎", "DISPATCHED": "◈",
-        "RUNNING": "●", "COMPLETED": "✓", "ERROR": "✗",
-    }
-
     def _on_ndif_status(job_id: str, status_name: str, description: str) -> None:
-        icon = _STATUS_ICONS.get(status_name, "•")
+        icon = NDIF_STATUS_ICONS.get(status_name, "•")
         ndif_status_box.caption(f"{icon} `{job_id}` **{status_name}** — {description}")
 
     with st.spinner("Loading model..."):
         model = cached_model(model_name=model_name, remote=remote)
 
     try:
-        total_steps = len(personas_to_run) * len(selected_variants)
+        total_steps = len(runs) * len(selected_variants)
         step = 0
         results = []
 
-        for persona in personas_to_run:
-            qa_pairs = qa_by_persona[persona.id][:max_questions]
+        for persona, qa_pairs in runs:
             for variant in selected_variants:
                 progress.progress(
                     step / total_steps if total_steps else 1.0,
@@ -181,7 +179,7 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
                     model=model,
                     model_name=model_name,
                     persona=persona,
-                    qa_pairs=qa_pairs,
+                    qa_pairs=qa_pairs[:max_questions],
                     variants=[variant],
                     remote=remote,
                     on_status=_on_ndif_status if remote else None,

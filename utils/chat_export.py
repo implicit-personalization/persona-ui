@@ -3,53 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from persona_data.environment import get_artifacts_dir
-from persona_vectors.activation_io import model_dir_name
 
 from utils.helpers import slugify
-
-
-def build_chat_export_payload(
-    *,
-    model_name: str,
-    dataset_source: str,
-    persona_id: str,
-    persona_name: str | None,
-    panel_label: str | None,
-    prompt_mode: str,
-    system_prompt: str | None,
-    messages: list[dict[str, str]],
-    generation: dict[str, object],
-) -> dict[str, object]:
-    """Build a JSON-serializable snapshot of the current chat session.
-
-    Args:
-        model_name: Model identifier used for the chat.
-        dataset_source: Human-readable dataset source label.
-        persona_id: Selected persona id.
-        persona_name: Selected persona display name, if available.
-        prompt_mode: Active system prompt mode.
-        messages: Conversation messages without the system prompt.
-        generation: Generation settings used for the chat.
-
-    Returns:
-        A JSON-serializable dictionary.
-    """
-
-    return {
-        "model_name": model_name,
-        "dataset_source": dataset_source,
-        "persona": {
-            "id": persona_id,
-            "name": persona_name,
-        },
-        "panel_label": panel_label,
-        "prompt_mode": prompt_mode,
-        "generation": generation,
-        "messages": (
-            [{"role": "system", "content": system_prompt}] if system_prompt else []
-        )
-        + messages,
-    }
 
 
 def save_chat_export(
@@ -80,21 +35,26 @@ def save_chat_export(
         The path the export was written to.
     """
 
-    payload = build_chat_export_payload(
-        model_name=model_name,
-        dataset_source=dataset_source,
-        persona_id=persona_id,
-        persona_name=persona_name,
-        panel_label=panel_label,
-        prompt_mode=prompt_mode,
-        system_prompt=system_prompt,
-        messages=messages,
-        generation=generation,
-    )
+    payload = {
+        "model_name": model_name,
+        "dataset_source": dataset_source,
+        "persona": {
+            "id": persona_id,
+            "name": persona_name,
+        },
+        "panel_label": panel_label,
+        "prompt_mode": prompt_mode,
+        "generation": generation,
+        "messages": (
+            [{"role": "system", "content": system_prompt}] if system_prompt else []
+        )
+        + messages,
+    }
+
     export_dir = (
         get_artifacts_dir()
         / "chats"
-        / model_dir_name(model_name)
+        / model_name.replace("/", "__")
         / slugify(dataset_source)
         / slugify(persona_id)
     )
