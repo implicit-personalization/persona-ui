@@ -1,5 +1,7 @@
 # Persona UI
 
+[![Deploy to Hugging Face Spaces](https://huggingface.co/landing/badge.svg)](https://huggingface.co/spaces/implicit-personalization/persona-ui)
+
 Streamlit interface for persona vector extraction, analysis, and chat.
 
 > [!WARNING]
@@ -72,6 +74,21 @@ parent/
 
 ```bash
 streamlit run app.py
+```
+
+## Hugging Face Spaces Deployment
+
+This app can be deployed to Hugging Face Spaces using Docker.
+
+### Prerequisites
+
+No secrets needed! The dependencies are published on PyPI.
+
+### Build Locally (Optional)
+
+```bash
+docker build -t persona-ui .
+docker run -p 8501:8501 persona-ui
 ```
 
 ## Configuration

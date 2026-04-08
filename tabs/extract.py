@@ -111,7 +111,6 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         st.info("Select at least one persona.")
         return
 
-    runs = None
     max_questions = 0
 
     with st.expander("Advanced", expanded=False):
@@ -189,9 +188,6 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
             ),
         )
         st.session_state[_LAST_MAX_QUESTIONS_KEY] = max_questions
-
-    if runs is None:
-        return
 
     run_clicked = st.button("Run extraction", type="primary")
     if not run_clicked:

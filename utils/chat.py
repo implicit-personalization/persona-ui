@@ -82,11 +82,9 @@ def _format_generation_prompt(
     Tries the tokenizer's chat template first, falls back to normalized messages,
     then to a plain-text format if both template attempts fail.
     """
-    normalized_messages = messages
-
     try:
         prompt = tokenizer.apply_chat_template(
-            normalized_messages,
+            messages,
             tokenize=False,
             add_generation_prompt=True,
         )
@@ -94,11 +92,11 @@ def _format_generation_prompt(
         logger.debug(
             "Chat template failed on raw messages, trying normalized", exc_info=True
         )
-        normalized_messages = normalize_messages(messages)
+        messages = normalize_messages(messages)
 
         try:
             prompt = tokenizer.apply_chat_template(
-                normalized_messages,
+                messages,
                 tokenize=False,
                 add_generation_prompt=True,
             )
@@ -108,7 +106,7 @@ def _format_generation_prompt(
                 exc_info=True,
             )
             prompt = _format_plain_messages(
-                normalized_messages,
+                messages,
                 add_generation_prompt=True,
             )
 

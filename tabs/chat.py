@@ -38,7 +38,8 @@ def _render_collapsible_markdown(content: str) -> None:
 def _render_chat_message(message: dict[str, str]) -> None:
     if not message.get("content"):
         return
-    with st.chat_message(message["role"]):
+    with st.container(border=True):
+        st.caption(message["role"])
         _render_collapsible_markdown(message["content"])
 
 
@@ -46,47 +47,24 @@ def _render_inline_system_prompt(
     prompt_key: str,
     prompt_mode: str,
     active_system_prompt: str | None,
-    edit_key: str,
     height: int = 200,
 ) -> str | None:
-    """Render the system prompt as an inline editable item at the top of the chat."""
+    """Render the system prompt as an always-editable text area at the top of the chat."""
     if prompt_mode == "empty":
         return active_system_prompt
 
     if prompt_key not in st.session_state:
         st.session_state[prompt_key] = active_system_prompt or ""
 
-    current_prompt = st.session_state[prompt_key] or None
-    is_editing = st.session_state.get(edit_key) == -1
-
     with st.container(border=True):
         st.caption("System prompt")
-        if is_editing:
-            new_val = st.text_area(
-                "system_prompt_edit",
-                value=current_prompt or "",
-                height=height,
-                label_visibility="collapsed",
-                key=f"{prompt_key}_inline_edit",
-            )
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("Save", key=f"{edit_key}_sys_save", type="primary"):
-                    st.session_state[prompt_key] = new_val
-                    st.session_state[edit_key] = None
-                    st.rerun()
-            with c2:
-                if st.button("Cancel", key=f"{edit_key}_sys_cancel"):
-                    st.session_state[edit_key] = None
-                    st.rerun()
-        else:
-            if current_prompt:
-                _render_collapsible_markdown(current_prompt)
-            else:
-                st.markdown("*(empty)*")
-            if st.button("Edit", key=f"{edit_key}_sys_edit"):
-                st.session_state[edit_key] = -1
-                st.rerun()
+        st.text_area(
+            "system_prompt_edit",
+            value=st.session_state[prompt_key],
+            height=height,
+            label_visibility="collapsed",
+            key=prompt_key,
+        )
 
     return st.session_state.get(prompt_key) or None
 
@@ -105,7 +83,8 @@ def _render_editable_message(
 
     is_editing = st.session_state.get(edit_key) == msg_index
 
-    with st.chat_message(message["role"]):
+    with st.container(border=True):
+        st.caption(message["role"])
         if is_editing:
             new_content = st.text_area(
                 "Edit",
@@ -305,14 +284,9 @@ def _render_compare_mode(
     """Render the full side-by-side comparison UI."""
     left_col, right_col = st.columns(2)
 
-    def render_panel(
-        side: str, column
-    ) -> tuple[dict[str, object], Any, str | None, str]:
+    def render_panel(side: str) -> tuple[dict[str, object], Any, str | None, str]:
         panel_key = widget_key(context_key, f"cmp_{side}")
-        state = st.session_state.get(panel_key)
-        if state is None:
-            state = _default_chat_state()
-            st.session_state[panel_key] = state
+        state = _panel_state(panel_key)
         prompt_key = widget_key(panel_key, "custom_prompt")
         show_all_key = widget_key(panel_key, "show_all")
         edit_key = widget_key(panel_key, "edit_idx")
@@ -374,7 +348,6 @@ def _render_compare_mode(
                 prompt_key,
                 prompt_mode,
                 active_system_prompt,
-                edit_key,
                 height=150,
             )
         _render_chat_window(
@@ -390,11 +363,9 @@ def _render_compare_mode(
         return state, chat_log, active_system_prompt, pending_regen_key
 
     with left_col:
-        left_state, left_log, left_prompt, left_pending = render_panel("left", left_col)
+        left_state, left_log, left_prompt, left_pending = render_panel("left")
     with right_col:
-        right_state, right_log, right_prompt, right_pending = render_panel(
-            "right", right_col
-        )
+        right_state, right_log, right_prompt, right_pending = render_panel("right")
 
     panels = [
         (left_state, left_log, left_prompt, left_pending),
@@ -454,12 +425,9 @@ def _render_compare_mode(
                     executor.submit(
                         generate_chat_reply,
                         model=model,
-                        messages=(
-                            [{"role": "system", "content": panel_prompt}]
-                            if panel_prompt
-                            else []
-                        )
-                        + panel_state["messages"],
+                        messages=_build_chat_messages(
+                            panel_prompt, panel_state["messages"]
+                        ),
                         remote=remote,
                         past_key_values=panel_state["past_key_values"],
                         **gen_kwargs,
@@ -479,12 +447,9 @@ def _render_compare_mode(
                     results.append(
                         generate_chat_reply(
                             model=model,
-                            messages=(
-                                [{"role": "system", "content": panel_prompt}]
-                                if panel_prompt
-                                else []
-                            )
-                            + panel_state["messages"],
+                            messages=_build_chat_messages(
+                                panel_prompt, panel_state["messages"]
+                            ),
                             remote=remote,
                             past_key_values=panel_state["past_key_values"],
                             **gen_kwargs,
@@ -507,36 +472,22 @@ def _render_compare_mode(
         with panel_log:
             _render_chat_message({"role": "assistant", "content": result.text})
 
+    # Rerun so the newly appended turns are redrawn through the editable history
+    # renderer instead of only appearing in the one-off generation pass.
+    st.rerun()
+
 
 # ── Main tab entry point ───────────────────────────────────────────────────────
 
 
-def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
-    """Render the chat tab."""
+def _render_generation_settings(
+    context_key: str, remote: bool
+) -> tuple[dict, bool]:
+    """Render the Advanced generation settings expander.
 
-    st.title("Chat")
-
-    context_key = chat_session_key(model_name, dataset_source)
-    chat_state = get_chat_state(model_name, remote, dataset_source)
-    try:
-        dataset, dataset_status = load_dataset(
-            dataset_source,
-            personas_file=st.session_state.get("extract__personas_file"),
-            qa_file=st.session_state.get("extract__qa_file"),
-        )
-        st.caption(dataset_status)
-    except Exception as exc:
-        st.error(f"Could not load data: {exc}")
-        st.info("Check the selected dataset source or upload both JSONL files.")
-        return
-
-    personas = list(dataset)
-    if not personas:
-        st.warning("No personas found in the selected dataset.")
-        st.info("Try a different dataset source or upload a non-empty personas file.")
-        return
-
-    # ── Generation settings ───────────────────────────────────────────────────
+    Returns ``(gen_kwargs, advanced_generation)`` where ``advanced_generation``
+    is True when any setting differs from its default.
+    """
     with st.expander("Advanced", expanded=False):
         config_col1, config_col2 = st.columns([2, 1])
         with config_col1:
@@ -643,6 +594,35 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         repetition_penalty=repetition_penalty,
         seed=generation_seed,
     )
+    return gen_kwargs, advanced_generation
+
+
+def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
+    """Render the chat tab."""
+
+    st.title("Chat")
+
+    context_key = chat_session_key(model_name, dataset_source)
+    chat_state = get_chat_state(model_name, remote, dataset_source)
+    try:
+        dataset, dataset_status = load_dataset(
+            dataset_source,
+            personas_file=st.session_state.get("extract__personas_file"),
+            qa_file=st.session_state.get("extract__qa_file"),
+        )
+        st.caption(dataset_status)
+    except Exception as exc:
+        st.error(f"Could not load data: {exc}")
+        st.info("Check the selected dataset source or upload both JSONL files.")
+        return
+
+    personas = list(dataset)
+    if not personas:
+        st.warning("No personas found in the selected dataset.")
+        st.info("Try a different dataset source or upload a non-empty personas file.")
+        return
+
+    gen_kwargs, advanced_generation = _render_generation_settings(context_key, remote)
 
     # ── Mode toggle ───────────────────────────────────────────────────────────
     compare_mode = st.toggle(
@@ -731,7 +711,6 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
             prompt_key,
             prompt_mode,
             active_system_prompt,
-            edit_key,
             height=200,
         )
 

@@ -10,14 +10,15 @@ dependencies = [
     "streamlit>=1.44.0",
     "plotly>=6.6.0",
     "python-dotenv>=1.2.2",
+    "transformers>=5.5.0",
 ]
+
 
 [tool.uv.sources]
 # Local development:
-# persona-vectors = { path = "../persona-vectors", editable = true }
 # persona-data = { path = "../persona-data", editable = true }
-persona-vectors = { git = "ssh://git@github.com/implicit-personalization/persona-vectors.git" }
-persona-data = { git = "ssh://git@github.com/implicit-personalization/persona-data.git" }
+persona-vectors = { path = "../persona-vectors", editable = true }
+persona-data = { git = "https://github.com/implicit-personalization/persona-data.git" }
 
 # [build-system]
 # requires = ["uv_build>=0.11.3,<0.12"]
