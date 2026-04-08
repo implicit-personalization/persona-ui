@@ -1,15 +1,27 @@
+from typing import Literal, cast
+
 import streamlit as st
+from persona_vectors.artifacts import SUPPORTED_VARIANTS
 from persona_vectors.extraction import run_extraction
 
 from utils.datasets import load_dataset
 from utils.helpers import (
     NDIF_STATUS_ICONS,
-    PROMPT_VARIANTS,
     persona_label,
     prompt_variant_label,
     widget_key,
 )
 from utils.runtime import cached_model
+
+# Cross-model / remote-switch persistence — same pattern as compare.py.
+# Written on every render so selections survive model or NDIF toggles.
+_LAST_VARIANTS_KEY = "extract:last_variants"
+_LAST_PERSONA_IDS_KEY = "extract:last_persona_ids"
+_LAST_QA_TYPE_KEY = "extract:last_qa_type"
+_LAST_DIFFICULTY_KEY = "extract:last_difficulty"
+_LAST_MAX_QUESTIONS_KEY = "extract:last_max_questions"
+
+_QA_TYPE_OPTIONS = ["all", "explicit", "implicit"]
 
 
 def _extract_widget_key(
@@ -26,7 +38,7 @@ def _render_local_dataset_uploads() -> None:
             "personas.jsonl",
             type=["jsonl"],
             key="extract__personas_file",
-            help="Expected fields: id, persona, templated_prompt, biography_md",
+            help="Expected fields: id, persona, templated_view, biography_view",
         )
         st.file_uploader(
             "qa.jsonl",
@@ -44,19 +56,28 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
     if dataset_source == "Local JSONL upload":
         _render_local_dataset_uploads()
 
+    last_variants = st.session_state.get(_LAST_VARIANTS_KEY, list(SUPPORTED_VARIANTS))
+    default_variants = [v for v in last_variants if v in SUPPORTED_VARIANTS] or list(
+        SUPPORTED_VARIANTS
+    )
     selected_variants = st.multiselect(
         "Prompt variants",
-        options=PROMPT_VARIANTS,
-        default=PROMPT_VARIANTS,
+        options=SUPPORTED_VARIANTS,
+        default=default_variants,
         format_func=prompt_variant_label,
         key=_extract_widget_key(model_name, remote, dataset_source, "prompt_variants"),
     )
+    st.session_state[_LAST_VARIANTS_KEY] = selected_variants
     if not selected_variants:
         st.info("Select at least one prompt variant.")
         return
 
     try:
-        dataset, dataset_status = load_dataset(dataset_source)
+        dataset, dataset_status = load_dataset(
+            dataset_source,
+            personas_file=st.session_state.get("extract__personas_file"),
+            qa_file=st.session_state.get("extract__qa_file"),
+        )
         st.caption(dataset_status)
     except Exception as exc:
         st.error(f"Could not load data: {exc}")
@@ -73,13 +94,18 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         )
         return
 
+    last_persona_ids: set[str] = set(st.session_state.get(_LAST_PERSONA_IDS_KEY, []))
+    default_personas = [p for p in personas if p.id in last_persona_ids] or [
+        personas[0]
+    ]
     selected_personas = st.multiselect(
         "Personas",
         options=personas,
-        default=[personas[0]] if personas else [],
+        default=default_personas,
         format_func=persona_label,
         key=_extract_widget_key(model_name, remote, dataset_source, "persona_select"),
     )
+    st.session_state[_LAST_PERSONA_IDS_KEY] = [p.id for p in selected_personas]
 
     if not selected_personas:
         st.info("Select at least one persona.")
@@ -93,26 +119,42 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
 
         col1, col2, col3 = st.columns([2, 2, 1])
         with col1:
+            last_qa_type = st.session_state.get(_LAST_QA_TYPE_KEY, "all")
+            qa_type_index = (
+                _QA_TYPE_OPTIONS.index(last_qa_type)
+                if last_qa_type in _QA_TYPE_OPTIONS
+                else 0
+            )
             qa_type_select = st.selectbox(
                 "QA type",
-                options=["all", "explicit", "implicit"],
-                index=0,
+                options=_QA_TYPE_OPTIONS,
+                index=qa_type_index,
                 key=_extract_widget_key(
                     model_name, remote, dataset_source, "qa_type_select"
                 ),
             )
-            qa_filter_type = (
-                qa_type_select if qa_type_select in ("explicit", "implicit") else None
+            st.session_state[_LAST_QA_TYPE_KEY] = qa_type_select
+            qa_filter_type: Literal["explicit", "implicit"] | None = (
+                cast(Literal["explicit", "implicit"], qa_type_select)
+                if qa_type_select in ("explicit", "implicit")
+                else None
             )
         with col2:
+            last_difficulty = st.session_state.get(_LAST_DIFFICULTY_KEY, [1, 2, 3])
+            default_difficulty = [d for d in last_difficulty if d in (1, 2, 3)] or [
+                1,
+                2,
+                3,
+            ]
             difficulty_values = st.multiselect(
                 "Difficulty",
                 options=[1, 2, 3],
-                default=[1, 2, 3],
+                default=default_difficulty,
                 key=_extract_widget_key(
                     model_name, remote, dataset_source, "difficulty_select"
                 ),
             )
+            st.session_state[_LAST_DIFFICULTY_KEY] = difficulty_values
             qa_filter_difficulty = difficulty_values if difficulty_values else None
 
         runs, skipped = [], []
@@ -135,15 +177,18 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
             return
 
         max_q = min(len(qa_pairs) for _, qa_pairs in runs)
+        last_max = st.session_state.get(_LAST_MAX_QUESTIONS_KEY, max_q)
+        default_max = min(max(last_max, 1), max_q)
         max_questions = st.slider(
             "Max questions",
             min_value=1,
             max_value=max_q,
-            value=max_q,
+            value=default_max,
             key=_extract_widget_key(
                 model_name, remote, dataset_source, "max_questions"
             ),
         )
+        st.session_state[_LAST_MAX_QUESTIONS_KEY] = max_questions
 
     if runs is None:
         return
@@ -180,7 +225,7 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
                     model_name=model_name,
                     persona=persona,
                     qa_pairs=qa_pairs[:max_questions],
-                    variants=[variant],
+                    variants=(variant,),
                     remote=remote,
                     on_status=_on_ndif_status if remote else None,
                 )

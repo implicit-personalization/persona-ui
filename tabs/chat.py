@@ -23,12 +23,118 @@ from utils.helpers import (
 )
 from utils.runtime import cached_model
 
+COLLAPSED_MESSAGE_CHAR_LIMIT = 500
+
+
+def _render_collapsible_markdown(content: str) -> None:
+    if len(content) <= COLLAPSED_MESSAGE_CHAR_LIMIT:
+        st.markdown(content)
+        return
+
+    with st.expander(f"Show full text ({len(content)} chars)", expanded=False):
+        st.markdown(content)
+
 
 def _render_chat_message(message: dict[str, str]) -> None:
     if not message.get("content"):
         return
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+        _render_collapsible_markdown(message["content"])
+
+
+def _render_inline_system_prompt(
+    prompt_key: str,
+    prompt_mode: str,
+    active_system_prompt: str | None,
+    edit_key: str,
+    height: int = 200,
+) -> str | None:
+    """Render the system prompt as an inline editable item at the top of the chat."""
+    if prompt_mode == "empty":
+        return active_system_prompt
+
+    if prompt_key not in st.session_state:
+        st.session_state[prompt_key] = active_system_prompt or ""
+
+    current_prompt = st.session_state[prompt_key] or None
+    is_editing = st.session_state.get(edit_key) == -1
+
+    with st.container(border=True):
+        st.caption("System prompt")
+        if is_editing:
+            new_val = st.text_area(
+                "system_prompt_edit",
+                value=current_prompt or "",
+                height=height,
+                label_visibility="collapsed",
+                key=f"{prompt_key}_inline_edit",
+            )
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Save", key=f"{edit_key}_sys_save", type="primary"):
+                    st.session_state[prompt_key] = new_val
+                    st.session_state[edit_key] = None
+                    st.rerun()
+            with c2:
+                if st.button("Cancel", key=f"{edit_key}_sys_cancel"):
+                    st.session_state[edit_key] = None
+                    st.rerun()
+        else:
+            if current_prompt:
+                _render_collapsible_markdown(current_prompt)
+            else:
+                st.markdown("*(empty)*")
+            if st.button("Edit", key=f"{edit_key}_sys_edit"):
+                st.session_state[edit_key] = -1
+                st.rerun()
+
+    return st.session_state.get(prompt_key) or None
+
+
+def _render_editable_message(
+    message: dict[str, str],
+    msg_index: int,
+    messages: list[dict[str, str]],
+    chat_state: dict[str, object],
+    edit_key: str,
+    pending_key: str,
+) -> None:
+    """Render a single message with an inline edit button."""
+    if not message.get("content"):
+        return
+
+    is_editing = st.session_state.get(edit_key) == msg_index
+
+    with st.chat_message(message["role"]):
+        if is_editing:
+            new_content = st.text_area(
+                "Edit",
+                value=message["content"],
+                height=100,
+                label_visibility="collapsed",
+                key=f"{edit_key}_msg_{msg_index}",
+            )
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button(
+                    "Save", key=f"{edit_key}_msg_save_{msg_index}", type="primary"
+                ):
+                    messages[msg_index]["content"] = new_content
+                    del messages[msg_index + 1 :]
+                    chat_state["past_key_values"] = None
+                    st.session_state[edit_key] = None
+                    if message["role"] == "user":
+                        st.session_state[pending_key] = True
+                    st.rerun()
+            with c2:
+                if st.button("Cancel", key=f"{edit_key}_msg_cancel_{msg_index}"):
+                    st.session_state[edit_key] = None
+                    st.rerun()
+        else:
+            st.markdown(message["content"])
+            if st.button("Edit", key=f"{edit_key}_msg_edit_{msg_index}"):
+                st.session_state[edit_key] = msg_index
+                st.rerun()
 
 
 def _clear_chat_ui_state(*keys: str) -> None:
@@ -38,14 +144,13 @@ def _clear_chat_ui_state(*keys: str) -> None:
 
 def _reset_single_chat_context(
     model_name: str,
-    remote: bool,
     dataset_source: str,
     chat_state: dict[str, object],
     persona_id: str,
     prompt_mode: str,
     *ui_keys: str,
 ) -> None:
-    reset_chat_state(model_name, remote, dataset_source)
+    reset_chat_state(model_name, dataset_source)
     chat_state["persona_id"] = persona_id
     chat_state["prompt_mode"] = prompt_mode
     _clear_chat_ui_state(*ui_keys)
@@ -101,35 +206,6 @@ def _render_persona_prompt_controls(
     return selected_persona, prompt_mode, changed
 
 
-def _render_system_prompt_editor(
-    prompt_key: str,
-    prompt_mode: str,
-    active_system_prompt: str | None,
-    *,
-    height: int,
-    label: str = "Prompt",
-) -> str | None:
-    """Render the editable system prompt area for a chat panel."""
-
-    if prompt_mode == "empty":
-        return active_system_prompt
-
-    if prompt_key not in st.session_state:
-        st.session_state[prompt_key] = active_system_prompt or ""
-
-    with st.expander("Edit prompt", expanded=False):
-        edited_prompt = (
-            st.text_area(
-                label,
-                key=prompt_key,
-                height=height,
-                label_visibility="collapsed",
-            )
-            or None
-        )
-    return edited_prompt
-
-
 def _render_chat_window(
     *,
     chat_log: Any,
@@ -137,6 +213,9 @@ def _render_chat_window(
     show_all_key: str,
     show_all_btn_key: str,
     show_earlier_label: str,
+    chat_state: dict[str, object] | None = None,
+    edit_key: str | None = None,
+    pending_key: str | None = None,
 ) -> Any:
     """Render the visible chat history inside one container."""
 
@@ -152,11 +231,19 @@ def _render_chat_window(
                 st.session_state[show_all_key] = True
                 st.rerun()
             visible_messages = messages[-VISIBLE_MESSAGE_COUNT:]
+            index_offset = len(messages) - VISIBLE_MESSAGE_COUNT
         else:
             visible_messages = messages
+            index_offset = 0
 
-        for message in visible_messages:
-            _render_chat_message(message)
+        for i, message in enumerate(visible_messages):
+            actual_index = index_offset + i
+            if edit_key and pending_key:
+                _render_editable_message(
+                    message, actual_index, messages, chat_state, edit_key, pending_key
+                )
+            else:
+                _render_chat_message(message)
 
     return chat_log
 
@@ -218,7 +305,9 @@ def _render_compare_mode(
     """Render the full side-by-side comparison UI."""
     left_col, right_col = st.columns(2)
 
-    def render_panel(side: str, column) -> tuple[dict[str, object], Any, str | None]:
+    def render_panel(
+        side: str, column
+    ) -> tuple[dict[str, object], Any, str | None, str]:
         panel_key = widget_key(context_key, f"cmp_{side}")
         state = st.session_state.get(panel_key)
         if state is None:
@@ -226,6 +315,8 @@ def _render_compare_mode(
             st.session_state[panel_key] = state
         prompt_key = widget_key(panel_key, "custom_prompt")
         show_all_key = widget_key(panel_key, "show_all")
+        edit_key = widget_key(panel_key, "edit_idx")
+        pending_regen_key = widget_key(panel_key, "pending_regen")
 
         selected_persona, prompt_mode, changed = _render_persona_prompt_controls(
             personas,
@@ -240,15 +331,10 @@ def _render_compare_mode(
             state["persona_id"] = selected_persona.id
             state["prompt_mode"] = prompt_mode
             _clear_chat_ui_state(prompt_key, show_all_key)
+            st.session_state.pop(edit_key, None)
 
         active_system_prompt = resolve_system_prompt(
             persona=selected_persona, mode=prompt_mode
-        )
-        active_system_prompt = _render_system_prompt_editor(
-            prompt_key,
-            prompt_mode,
-            active_system_prompt,
-            height=150,
         )
 
         btn_col1, btn_col2 = st.columns(2)
@@ -279,22 +365,73 @@ def _render_compare_mode(
                 state["messages"] = []
                 state["past_key_values"] = None
                 _clear_chat_ui_state(prompt_key, show_all_key)
+                st.session_state.pop(edit_key, None)
                 st.rerun()
 
         chat_log = st.container()
+        with chat_log:
+            active_system_prompt = _render_inline_system_prompt(
+                prompt_key,
+                prompt_mode,
+                active_system_prompt,
+                edit_key,
+                height=150,
+            )
         _render_chat_window(
             chat_log=chat_log,
             messages=state["messages"],
             show_all_key=show_all_key,
             show_all_btn_key=widget_key(panel_key, "show_all_btn"),
             show_earlier_label="Show earlier",
+            chat_state=state,
+            edit_key=edit_key,
+            pending_key=pending_regen_key,
         )
-        return state, chat_log, active_system_prompt
+        return state, chat_log, active_system_prompt, pending_regen_key
 
     with left_col:
-        left_state, left_log, left_prompt = render_panel("left", left_col)
+        left_state, left_log, left_prompt, left_pending = render_panel("left", left_col)
     with right_col:
-        right_state, right_log, right_prompt = render_panel("right", right_col)
+        right_state, right_log, right_prompt, right_pending = render_panel(
+            "right", right_col
+        )
+
+    panels = [
+        (left_state, left_log, left_prompt, left_pending),
+        (right_state, right_log, right_prompt, right_pending),
+    ]
+
+    # Handle per-panel regeneration triggered by message edits
+    any_regen = any(st.session_state.get(p_pending) for _, _, _, p_pending in panels)
+    if any_regen:
+        model = cached_model(model_name=model_name, remote=remote)
+        for panel_state, panel_log, panel_prompt, p_pending in panels:
+            if not st.session_state.pop(p_pending, False):
+                continue
+            regen_messages = _build_chat_messages(panel_prompt, panel_state["messages"])
+            with st.spinner("Regenerating..."):
+                try:
+                    result = generate_chat_reply(
+                        model=model,
+                        messages=regen_messages,
+                        remote=remote,
+                        past_key_values=panel_state["past_key_values"],
+                        **gen_kwargs,
+                    )
+                except Exception as exc:
+                    with panel_log:
+                        st.error(f"Generation failed: {exc}")
+                    panel_state["messages"].pop()
+                    continue
+            panel_state["messages"].append(
+                {"role": "assistant", "content": result.text}
+            )
+            panel_state["past_key_values"] = (
+                result.past_key_values if not remote else None
+            )
+            with panel_log:
+                _render_chat_message({"role": "assistant", "content": result.text})
+        st.rerun()
 
     user_prompt = st.chat_input(
         "Ask both...",
@@ -304,12 +441,8 @@ def _render_compare_mode(
         return
 
     model = cached_model(model_name=model_name, remote=remote)
-    panels = [
-        (left_state, left_log, left_prompt),
-        (right_state, right_log, right_prompt),
-    ]
 
-    for panel_state, panel_log, _panel_prompt in panels:
+    for panel_state, panel_log, _panel_prompt, _p_pending in panels:
         panel_state["messages"].append({"role": "user", "content": user_prompt})
         with panel_log:
             _render_chat_message({"role": "user", "content": user_prompt})
@@ -331,7 +464,7 @@ def _render_compare_mode(
                         past_key_values=panel_state["past_key_values"],
                         **gen_kwargs,
                     )
-                    for panel_state, _panel_log, panel_prompt in panels
+                    for panel_state, _panel_log, panel_prompt, _p_pending in panels
                 ]
                 results: list[ChatReply | Exception] = []
                 for future in futures:
@@ -341,7 +474,7 @@ def _render_compare_mode(
                         results.append(exc)
         else:
             results = []
-            for panel_state, _panel_log, panel_prompt in panels:
+            for panel_state, _panel_log, panel_prompt, _p_pending in panels:
                 try:
                     results.append(
                         generate_chat_reply(
@@ -360,7 +493,9 @@ def _render_compare_mode(
                 except Exception as exc:
                     results.append(exc)
 
-    for (panel_state, panel_log, _panel_prompt), result in zip(panels, results):
+    for (panel_state, panel_log, _panel_prompt, _p_pending), result in zip(
+        panels, results
+    ):
         if isinstance(result, Exception):
             with panel_log:
                 st.error(f"Generation failed: {result}")
@@ -384,7 +519,11 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     context_key = chat_session_key(model_name, dataset_source)
     chat_state = get_chat_state(model_name, remote, dataset_source)
     try:
-        dataset, dataset_status = load_dataset(dataset_source)
+        dataset, dataset_status = load_dataset(
+            dataset_source,
+            personas_file=st.session_state.get("extract__personas_file"),
+            qa_file=st.session_state.get("extract__qa_file"),
+        )
         st.caption(dataset_status)
     except Exception as exc:
         st.error(f"Could not load data: {exc}")
@@ -534,6 +673,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     pending_key = widget_key(context_key, "pending_prompt")
     export_key = widget_key(context_key, "export_chat")
     reset_key = widget_key(context_key, "reset")
+    edit_key = widget_key(context_key, "edit_idx")
 
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -571,7 +711,6 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         had_history = bool(chat_state["messages"])
         _reset_single_chat_context(
             model_name,
-            remote,
             dataset_source,
             chat_state,
             selected_persona.id,
@@ -581,17 +720,20 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
             prompt_key,
             pending_key,
         )
+        st.session_state.pop(edit_key, None)
         if had_history:
             st.info("Chat history reset because the persona or system prompt changed.")
 
     chat_log = st.container()
 
-    active_system_prompt = _render_system_prompt_editor(
-        prompt_key,
-        prompt_mode,
-        active_system_prompt,
-        height=200,
-    )
+    with chat_log:
+        active_system_prompt = _render_inline_system_prompt(
+            prompt_key,
+            prompt_mode,
+            active_system_prompt,
+            edit_key,
+            height=200,
+        )
 
     action_col1, action_col2 = st.columns(2)
     with action_col1:
@@ -612,7 +754,6 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         if st.button("Reset chat", key=reset_key, width="stretch", type="secondary"):
             _reset_single_chat_context(
                 model_name,
-                remote,
                 dataset_source,
                 chat_state,
                 selected_persona.id,
@@ -622,6 +763,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
                 prompt_key,
                 pending_key,
             )
+            st.session_state.pop(edit_key, None)
             st.rerun()
 
     _render_chat_window(
@@ -630,6 +772,9 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         show_all_key=show_all_key,
         show_all_btn_key=widget_key(context_key, "show_all_btn"),
         show_earlier_label="Show earlier messages",
+        chat_state=chat_state,
+        edit_key=edit_key,
+        pending_key=pending_key,
     )
 
     user_prompt = st.chat_input(

@@ -5,18 +5,19 @@ description = "Streamlit UI for persona-vectors"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "persona-vectors",
-    "persona-data",
+    "persona-vectors>=0.1.0",
+    "persona-data>=0.1.0",
     "streamlit>=1.44.0",
     "plotly>=6.6.0",
     "python-dotenv>=1.2.2",
 ]
 
 [tool.uv.sources]
-persona-vectors = { path = "../persona-vectors", editable = true }
-persona-data = { path = "../persona-data", editable = true }
-# persona-vectors = { git = "ssh://git@github.com/implicit-personalization/persona-vectors.git" }  # use for release
-# persona-data = { git = "ssh://git@github.com/implicit-personalization/persona-data.git" }  # use for release
+# Local development:
+# persona-vectors = { path = "../persona-vectors", editable = true }
+# persona-data = { path = "../persona-data", editable = true }
+persona-vectors = { git = "ssh://git@github.com/implicit-personalization/persona-vectors.git" }
+persona-data = { git = "ssh://git@github.com/implicit-personalization/persona-data.git" }
 
 # [build-system]
 # requires = ["uv_build>=0.11.3,<0.12"]

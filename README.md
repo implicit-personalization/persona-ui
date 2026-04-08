@@ -42,9 +42,15 @@ uv sync
 cp .env.example .env
 ```
 
+## Local Development
+
+The committed dependency graph uses git sources so `persona-ui` can install cleanly in a Hugging Face Space or any isolated environment.
+
+For local sibling checkouts, uncomment the `path` sources in `persona-ui/pyproject.toml` and `persona-vectors/pyproject.toml`, then comment out the git sources.
+
 ## Local Setup Note
 
-For now, `persona-data` and `persona-vectors` need to be checked out in the parent directory of `persona-ui`.
+For local development, `persona-data` and `persona-vectors` can still be checked out in the parent directory of `persona-ui`.
 
 Example:
 
@@ -80,6 +86,9 @@ ARTIFACTS_DIR=...      # Optional: where activations are read from (default: ./a
 
 The app picks up this file automatically via `load_dotenv()` on startup.
 
+You can also override the active NDIF or Hugging Face token from the sidebar
+`API Keys` section. Those inputs only apply for the current session.
+
 ## Saved Artifacts
 
 The Compare and Extract tabs read from / write to:
@@ -88,7 +97,7 @@ The Compare and Extract tabs read from / write to:
 artifacts/
 ├── activations/<model_dir>/<prompt_variant>/<persona_id>/
 │   ├── activations.safetensors
-│   └── metadata.json
+│   └── metadata.json   # used for persona names and layer counts
 └── chats/<model_dir>/<prompt_variant>/
     └── <export>.json
 ```

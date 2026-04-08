@@ -1,7 +1,6 @@
 import re
 
 from persona_data.synth_persona import PersonaData
-from persona_vectors.artifacts import SUPPORTED_VARIANTS
 
 # Variant key -> human-readable label mapping
 VARIANT_LABELS = {
@@ -10,9 +9,6 @@ VARIANT_LABELS = {
     "biography": "Biography",
     "custom": "Custom",
 }
-
-# Variants that correspond to actual system prompts (excludes "empty")
-PROMPT_VARIANTS = list(SUPPORTED_VARIANTS)
 
 # For selectbox options: list of labels in definition order
 MODE_LABELS = list(VARIANT_LABELS.values())

@@ -54,7 +54,7 @@ def save_chat_export(
     export_dir = (
         get_artifacts_dir()
         / "chats"
-        / model_name.replace("/", "__")
+        / "__".join(slugify(part) for part in model_name.split("/"))
         / slugify(dataset_source)
         / slugify(persona_id)
     )

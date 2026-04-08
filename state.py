@@ -51,9 +51,11 @@ def get_chat_state(
     return state
 
 
-def reset_chat_state(model_name: str, remote: bool, dataset_source: str) -> None:
+def reset_chat_state(model_name: str, dataset_source: str) -> None:
     """Reset chat history and cache for the active context."""
 
-    state = get_chat_state(model_name, remote, dataset_source)
-    state["messages"] = []
-    state["past_key_values"] = None
+    key = chat_session_key(model_name, dataset_source)
+    if key in st.session_state:
+        state = st.session_state[key]
+        state["messages"] = []
+        state["past_key_values"] = None

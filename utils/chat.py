@@ -5,17 +5,10 @@ from typing import Literal
 
 import torch
 from nnterp import StandardizedTransformer
-
-logger = logging.getLogger(__name__)
-
-from persona_data.prompts import (
-    format_biography_prompt,
-    format_empty_persona_prompt,
-    format_templated_prompt,
-    normalize_messages,
-)
+from persona_data.prompts import format_roleplay_prompt, normalize_messages
 from persona_data.synth_persona import PersonaData
 
+logger = logging.getLogger(__name__)
 SystemPromptMode = Literal["empty", "templated", "biography", "custom"]
 
 
@@ -47,11 +40,12 @@ def resolve_system_prompt(
     if mode == "empty":
         return ""
     if mode == "templated":
-        return format_templated_prompt(persona.templated_prompt)
+        return format_roleplay_prompt(persona.templated_view, mode="conversational")
     if mode == "biography":
-        return format_biography_prompt(persona.biography_md)
+        return format_roleplay_prompt(persona.biography_view, mode="conversational")
     if mode == "custom":
-        return format_empty_persona_prompt()
+        return format_roleplay_prompt(mode="conversational")
+    raise ValueError(f"Unsupported system prompt mode: {mode}")
 
 
 def _format_plain_messages(

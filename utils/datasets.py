@@ -44,14 +44,14 @@ def _uploaded_file_to_temp_path(uploaded_file: Any, stem: str) -> Path:
 
 def load_dataset(
     dataset_source: str,
+    personas_file: Any = None,
+    qa_file: Any = None,
 ) -> tuple[SynthPersonaDataset | LocalPersonaDataset, str]:
     """Load the selected dataset source for the UI."""
 
     if dataset_source == DATASET_SOURCES[0]:
         return cached_hf_dataset(), "SynthPersona"
 
-    personas_file = st.session_state.get("extract__personas_file")
-    qa_file = st.session_state.get("extract__qa_file")
     if personas_file is None or qa_file is None:
         raise ValueError("Upload both personas.jsonl and qa.jsonl files")
 
