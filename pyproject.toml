@@ -3,7 +3,7 @@ name = "persona-ui"
 version = "0.1.0"
 description = "Streamlit UI for persona-vectors"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "persona-vectors>=0.1.0",
     "persona-data>=0.1.0",
@@ -12,7 +12,6 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "transformers>=5.5.0",
 ]
-
 
 [tool.uv.sources]
 # Local development:

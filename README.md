@@ -96,7 +96,8 @@ No secrets needed! The dependencies are published on PyPI.
 
 ```bash
 docker build -t persona-ui .
-docker run -p 8501:8501 persona-ui
+# Specify your local .env to have things working as expectd
+docker run --env-file .env --rm -p 8501:8501 persona-ui
 ```
 
 ## Configuration
@@ -110,9 +111,6 @@ ARTIFACTS_DIR=...      # Optional: where activations are read from (default: ./a
 ```
 
 The app picks up this file automatically via `load_dotenv()` on startup.
-
-You can also override the active NDIF or Hugging Face token from the sidebar
-`API Keys` section. Those inputs only apply for the current session.
 
 ## Saved Artifacts
 

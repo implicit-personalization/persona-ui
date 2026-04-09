@@ -8,31 +8,10 @@ from utils.helpers import DATASET_SOURCES
 load_dotenv()
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "google/gemma-2-2b-it")
 REMOTE_DEFAULT_MODEL = os.environ.get("REMOTE_DEFAULT_MODEL", "google/gemma-2-9b-it")
-NDIF_API_KEY = os.environ.get("NDIF_API_KEY", "")
 
 
 _TABS = ["Chat", "Compare", "Extract"]
 _TAB_ICONS = [":material/chat:", ":material/search:", ":material/tune:"]
-
-
-def _sync_sidebar_api_key(env_var: str, value: str) -> None:
-    if value:
-        os.environ[env_var] = value
-
-
-def _sidebar_api_keys() -> None:
-    with st.sidebar:
-        st.divider()
-        st.caption("API Keys")
-
-        ndif_api_key = st.text_input(
-            "NDIF API key",
-            value=NDIF_API_KEY,
-            type="password",
-            key="sidebar__ndif_api_key",
-            help="Overrides NDIF_API_KEY for this session.",
-        )
-        _sync_sidebar_api_key("NDIF_API_KEY", ndif_api_key)
 
 
 def _sidebar_controls() -> tuple[bool, str, str, str]:
@@ -95,8 +74,6 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
             key="sidebar__dataset_source",
             help="Dataset for Chat and Extract.",
         )
-
-    _sidebar_api_keys()
 
     return remote, model_name, dataset_source, active_tab
 
