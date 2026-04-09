@@ -9,7 +9,6 @@ load_dotenv()
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "google/gemma-2-2b-it")
 REMOTE_DEFAULT_MODEL = os.environ.get("REMOTE_DEFAULT_MODEL", "google/gemma-2-9b-it")
 NDIF_API_KEY = os.environ.get("NDIF_API_KEY", "")
-HF_TOKEN = os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", ""))
 
 
 _TABS = ["Chat", "Compare", "Extract"]
@@ -34,16 +33,6 @@ def _sidebar_api_keys() -> None:
             help="Overrides NDIF_API_KEY for this session.",
         )
         _sync_sidebar_api_key("NDIF_API_KEY", ndif_api_key)
-
-        hf_token = st.text_input(
-            "Hugging Face token",
-            value=HF_TOKEN,
-            type="password",
-            key="sidebar__hf_token",
-            help="Overrides HF_TOKEN and HUGGING_FACE_HUB_TOKEN for this session.",
-        )
-        _sync_sidebar_api_key("HF_TOKEN", hf_token)
-        _sync_sidebar_api_key("HUGGING_FACE_HUB_TOKEN", hf_token)
 
 
 def _sidebar_controls() -> tuple[bool, str, str, str]:

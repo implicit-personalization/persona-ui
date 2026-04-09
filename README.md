@@ -1,6 +1,5 @@
 ---
 title: persona-ui
-emoji: "🤖"
 colorFrom: blue
 colorTo: indigo
 sdk: docker
@@ -9,7 +8,7 @@ pinned: false
 ---
 # Persona UI
 
-[![Deploy to Hugging Face Spaces](https://huggingface.co/landing/badge.svg)](https://huggingface.co/spaces/implicit-personalization/persona-ui)
+[![Deploy to Hugging Face Spaces](https://huggingface.co/spaces/implicit-personalization/persona-ui/badge.svg)](https://huggingface.co/spaces/implicit-personalization/persona-ui)
 
 Streamlit interface for persona vector extraction, analysis, and chat.
 
