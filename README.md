@@ -1,3 +1,12 @@
+---
+title: persona-ui
+emoji: "🤖"
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 8501
+pinned: false
+---
 # Persona UI
 
 [![Deploy to Hugging Face Spaces](https://huggingface.co/landing/badge.svg)](https://huggingface.co/spaces/implicit-personalization/persona-ui)
