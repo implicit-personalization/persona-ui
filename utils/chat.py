@@ -1,5 +1,5 @@
 import logging
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal
 
@@ -174,9 +174,11 @@ def generate_chat_reply(
 
     generation_kwargs: dict[str, object] = {
         "max_new_tokens": max_new_tokens,
-        "return_dict_in_generate": True,
         "use_cache": True,
     }
+    if not remote:
+        # No need for this in remote which also slows down download drastically
+        generation_kwargs["return_dict_in_generate"] = True
     if do_sample:
         generation_kwargs["do_sample"] = True
         generation_kwargs["temperature"] = temperature
@@ -186,21 +188,17 @@ def generate_chat_reply(
         generation_kwargs["repetition_penalty"] = repetition_penalty
     if past_key_values is not None and not remote:
         generation_kwargs["past_key_values"] = past_key_values
-    if remote:
-        generation_kwargs["remote"] = True
-        # WARNING: NDIF returns caches on CPU, so cross-turn cache reuse is not stable.
 
+    # `remote` is captured by nnsight's RemoteableMixin.trace() and is NOT
+    # forwarded to the underlying model's generate
     with _seeded_rng(seed if do_sample and not remote else None):
-        with model.generate(prompt, **generation_kwargs) as tracer:
+        with model.generate(prompt, remote=remote, **generation_kwargs) as tracer:
             generated = tracer.result.save()
 
     if hasattr(generated, "value") and getattr(generated, "value") is not None:
         generated = generated.value
 
-    if not hasattr(generated, "sequences"):
-        raise ValueError("Generation did not return token sequences")
-
-    sequences = generated.sequences
+    sequences = generated.sequences if hasattr(generated, "sequences") else generated
     if not isinstance(sequences, torch.Tensor):
         raise TypeError("Generated sequences must be a tensor")
 

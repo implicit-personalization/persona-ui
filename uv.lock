@@ -1207,7 +1207,7 @@ requires-dist = [
 
 [[package]]
 name = "persona-vectors"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kaleido" },
@@ -1224,9 +1224,9 @@ dependencies = [
     { name = "transformers" },
     { name = "umap-learn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/f8/618d9380a222d9d639bf62f6e5950a7a475687e82daec2fd9b60f2571dac/persona_vectors-0.1.1.tar.gz", hash = "sha256:b60f19aca42b4b2a67a8d3bcb069891a370d53a2d62dfbfe26aebe62645a8ad9", size = 10918, upload-time = "2026-04-09T10:00:37.622Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/86/ce/4bd6a69dd268ddb7eebf57e1d770a706483682c1aac77181502f94787b45/persona_vectors-0.1.2.tar.gz", hash = "sha256:8f14c5839e619e6a5e3902e54d5335bd58e92dd5d4d1559c5aabc5417084aacd", size = 10942, upload-time = "2026-04-09T10:30:10.731Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/48/fa7eb3ca7655af9a798e2a37ba0fb39873e4ddf54e40ba74eb7940a6300d/persona_vectors-0.1.1-py3-none-any.whl", hash = "sha256:fc91a70f71f2c042a159cab78e4e87d1841219ebdf9df679cf2c01d722b59d32", size = 14429, upload-time = "2026-04-09T10:00:38.381Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/a3/0e033b727f288564c166c9ef15a338119f52dea5fe2886970c34c03d951b/persona_vectors-0.1.2-py3-none-any.whl", hash = "sha256:dda78fbdf0815bc49d4069b16f4b85526a775637b85a14ba1be87dfb5f1f280c", size = 14451, upload-time = "2026-04-09T10:30:09.668Z" },
 ]
 
 [[package]]
