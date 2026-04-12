@@ -29,13 +29,17 @@ A web app built on top of [persona-vectors](../persona-vectors) that provides th
 persona-ui/
 ├── app.py                   # Main entry point (Streamlit)
 ├── state.py                 # Session state management (chat history, KV cache)
+├── scripts/
+│   └── oracle_probe.py      # Notebook-style activation oracle script
 ├── tabs/
 │   ├── chat.py              # Chat tab
 │   ├── compare.py           # Activation comparison tab
+│   ├── compare_chat.py      # Side-by-side chat comparison mode
 │   └── extract.py           # Extraction tab
 └── utils/
     ├── chat.py              # Chat generation logic
     ├── chat_export.py       # Export chat logs to JSON
+    ├── contrast.py          # Contrastive token log-prob coloring
     ├── datasets.py          # Dataset loader wrapper
     ├── helpers.py           # UI labels and slug helpers
     └── runtime.py           # Model caching and NDIF queries
@@ -121,8 +125,8 @@ artifacts/
 ├── activations/<model_dir>/<prompt_variant>/<persona_id>/
 │   ├── activations.safetensors
 │   └── metadata.json   # used for persona names and layer counts
-└── chats/<model_dir>/<prompt_variant>/
+└── chats/<model_dir>/<persona_id>/
     └── <export>.json
 ```
 
-`<model_dir>` is the model name with `/` replaced by `__` (e.g. `google__gemma-2-9b-it`).
+`<model_dir>` is the model name with `/` replaced by `__` (e.g. `google__gemma-2-9b-it`). Chat exports still store `dataset_source` in the JSON payload.

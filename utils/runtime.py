@@ -7,32 +7,61 @@ logger = logging.getLogger(__name__)
 
 @st.cache_data(show_spinner=False, ttl=30)
 def list_remote_models() -> list[str]:
-    """Return the NDIF language models that are currently running."""
+    """Return the NDIF language models that are currently running.
+
+    Parses the raw NDIF response directly instead of going through
+    ``nnsight.ndif_status()`` because that call crashes whenever NDIF reports
+    any deployment with an ``application_state`` that isn't in nnsight's
+    ``ModelStatus`` enum (e.g. ``UNHEALTHY``) — one bad deployment poisons
+    the whole response. See nnsight 0.6.3 ``ndif.py::status``.
+    """
+
+    import json
 
     import nnsight
 
     try:
-        status = nnsight.ndif_status()
+        raw = nnsight.ndif_status(raw=True)
     except Exception:
         logger.warning("Failed to fetch NDIF status", exc_info=True)
         return []
 
     model_names: list[str] = []
+    bad_states: list[tuple[str, str]] = []  # (repo_id_or_key, application_state)
 
-    for entry in status.values():
-        if not isinstance(entry, dict):
+    for value in (raw or {}).get("deployments", {}).values():
+        if not isinstance(value, dict):
             continue
-        if entry.get("model_class") not in {"LanguageModel", "StandardizedTransformer"}:
-            continue
-
-        state = entry.get("state")
-        state_name = getattr(state, "name", None) or getattr(state, "value", None)
-        if state_name != "RUNNING":
+        if (
+            value.get("deployment_level") not in {"HOT", "WARM"}
+            and "schedule" not in value
+        ):
             continue
 
-        repo_id = entry.get("repo_id")
+        model_key = value.get("model_key", "")
+        model_class = model_key.split(":", 1)[0].split(".")[-1]
+        try:
+            repo_id = json.loads(model_key.split(":", 1)[-1]).get("repo_id")
+        except Exception:
+            repo_id = model_key
+
+        state = value.get("application_state", "NOT DEPLOYED")
+        if state not in {"RUNNING", "NOT DEPLOYED", "DEPLOYING", "DELETING"}:
+            bad_states.append((repo_id or model_key, state))
+
+        if model_class not in {"LanguageModel", "StandardizedTransformer"}:
+            continue
+        if state != "RUNNING":
+            continue
         if isinstance(repo_id, str):
             model_names.append(repo_id)
+
+    if bad_states:
+        logger.warning(
+            "NDIF reported deployments with unexpected application_state values "
+            "(nnsight's ModelStatus enum may not know about these): %s",
+            bad_states,
+        )
 
     return sorted(set(model_names))
 

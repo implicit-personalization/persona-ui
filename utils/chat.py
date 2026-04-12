@@ -1,5 +1,5 @@
 import logging
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Literal
 
@@ -15,9 +15,8 @@ SystemPromptMode = Literal["empty", "templated", "biography", "custom"]
 @dataclass
 class ChatReply:
     text: str
-    prompt_tokens: int
-    output_tokens: int
     past_key_values: object | None
+    generated_ids: torch.Tensor | None = None
 
 
 def resolve_system_prompt(
@@ -204,13 +203,10 @@ def generate_chat_reply(
 
     generated_ids = sequences[0, prompt_token_count:]
     text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-    output_tokens = int(sequences.shape[1] - prompt_token_count)
-
     return ChatReply(
         text=text,
-        prompt_tokens=prompt_token_count,
-        output_tokens=max(0, output_tokens),
         past_key_values=(
             getattr(generated, "past_key_values", None) if not remote else None
         ),
+        generated_ids=generated_ids.detach().cpu(),
     )

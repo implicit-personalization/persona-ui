@@ -30,6 +30,7 @@ def save_chat_export(
         system_prompt: Current system prompt text, if any.
         messages: Conversation messages without the system prompt.
         generation: Generation settings used for the chat.
+        panel_label: Optional side label (e.g. "left"/"right") for compare-mode exports.
 
     Returns:
         The path the export was written to.
@@ -55,7 +56,6 @@ def save_chat_export(
         get_artifacts_dir()
         / "chats"
         / "__".join(slugify(part) for part in model_name.split("/"))
-        / slugify(dataset_source)
         / slugify(persona_id)
     )
     export_dir.mkdir(parents=True, exist_ok=True)

@@ -16,8 +16,6 @@ MODE_LABELS = list(VARIANT_LABELS.values())
 # Reverse lookup: label -> key
 MODE_LABEL_TO_KEY = {v: k for k, v in VARIANT_LABELS.items()}
 
-VISIBLE_MESSAGE_COUNT = 5
-
 DATASET_SOURCES = ["HuggingFace: synth-persona", "Local JSONL upload"]
 ANALYSIS_MODES = ["Cosine similarity", "PCA", "UMAP"]
 

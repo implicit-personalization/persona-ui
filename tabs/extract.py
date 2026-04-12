@@ -111,8 +111,6 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         st.info("Select at least one persona.")
         return
 
-    max_questions = 0
-
     with st.expander("Advanced", expanded=False):
         st.caption("Filters")
 
