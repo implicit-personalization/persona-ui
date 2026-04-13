@@ -4,18 +4,18 @@ from persona_data.synth_persona import PersonaData
 
 from state import default_chat_state, reset_chat_context_state
 from utils.chat import ChatReply, generate_chat_reply, resolve_system_prompt
+from utils.chat_export import save_chat_export
 from utils.contrast import compute_contrast, compute_contrast_pair
 from utils.helpers import persona_label, widget_key
 from utils.runtime import cached_model
 
 from .chat import (
-    _build_chat_messages,
-    _generation_dict,
-    _render_chat_message,
-    _render_chat_window,
-    _render_persona_prompt_controls,
-    _render_system_prompt,
-    _save_chat_export_message,
+    build_chat_messages,
+    generation_dict,
+    render_chat_message,
+    render_chat_window,
+    render_persona_prompt_controls,
+    render_system_prompt,
 )
 
 
@@ -47,7 +47,7 @@ def _generate_panel_reply(
 ) -> ChatReply:
     return generate_chat_reply(
         model=model,
-        messages=_build_chat_messages(panel_prompt, panel_state["messages"]),
+        messages=build_chat_messages(panel_prompt, panel_state["messages"]),
         remote=remote,
         past_key_values=panel_state["past_key_values"],
         **gen_kwargs,
@@ -90,17 +90,28 @@ def render_compare_mode(
     def render_panel(side: str) -> tuple[dict, object, str | None, str, PersonaData]:
         panel_key = widget_key(context_key, f"cmp_{side}")
         state = _panel_state(panel_key)
+
+        # Carry over persona / prompt selections across model or remote switches.
+        persist_persona_key = f"chat:last_cmp_{side}_persona"
+        persist_prompt_key = f"chat:last_cmp_{side}_prompt"
+        if state["persona_id"] is None:
+            state["persona_id"] = st.session_state.get(persist_persona_key)
+            state["prompt_mode"] = st.session_state.get(persist_prompt_key, "templated")
+
         prompt_key = widget_key(panel_key, "custom_prompt")
         edit_key = widget_key(panel_key, "edit_idx")
         pending_regen_key = widget_key(panel_key, "pending_regen")
 
-        selected_persona, prompt_mode, changed = _render_persona_prompt_controls(
+        selected_persona, prompt_mode, changed = render_persona_prompt_controls(
             personas,
             state["persona_id"],
             state["prompt_mode"],
             widget_key(panel_key, "persona"),
             widget_key(panel_key, "prompt_mode"),
         )
+        st.session_state[persist_persona_key] = selected_persona.id
+        st.session_state[persist_prompt_key] = prompt_mode
+
         if changed:
             reset_chat_context_state(
                 state,
@@ -117,7 +128,7 @@ def render_compare_mode(
 
         chat_log = st.container()
         with chat_log:
-            active_system_prompt = _render_system_prompt(
+            active_system_prompt = render_system_prompt(
                 prompt_key,
                 prompt_mode,
                 active_system_prompt,
@@ -220,10 +231,10 @@ def render_compare_mode(
                     ):
                         msg.pop("_needs_contrast", None)
                         continue
-                    context_a = _build_chat_messages(
+                    context_a = build_chat_messages(
                         left_prompt, left_state["messages"][:msg_idx]
                     )
-                    context_b = _build_chat_messages(
+                    context_b = build_chat_messages(
                         right_prompt, right_state["messages"][:msg_idx]
                     )
                     try:
@@ -256,7 +267,7 @@ def render_compare_mode(
         panel_edit_key,
         _,
     ) in panels:
-        _render_chat_window(
+        render_chat_window(
             chat_log=panel_log,
             messages=panel_state["messages"],
             chat_state=panel_state,
@@ -267,6 +278,9 @@ def render_compare_mode(
         )
 
     footer = st.container()
+    reset_menu_nonce_key = widget_key(context_key, "cmp_reset_menu_nonce")
+    if reset_menu_nonce_key not in st.session_state:
+        st.session_state[reset_menu_nonce_key] = 0
     with footer:
         exp_col, rst_col, _spacer = st.columns([0.5, 0.5, 10], gap="xsmall")
         with exp_col:
@@ -280,7 +294,7 @@ def render_compare_mode(
                     ("left", left_state, left_prompt, left_persona),
                     ("right", right_state, right_prompt, right_persona),
                 ):
-                    _save_chat_export_message(
+                    save_chat_export(
                         model_name=model_name,
                         dataset_source=dataset_source,
                         persona_id=panel_persona.id,
@@ -288,15 +302,21 @@ def render_compare_mode(
                         prompt_mode=panel_state["prompt_mode"],
                         system_prompt=panel_prompt,
                         messages=panel_state["messages"],
-                        generation=_generation_dict(gen_kwargs, advanced_generation),
+                        generation=generation_dict(gen_kwargs, advanced_generation),
                         panel_label=side,
                     )
                 st.toast("Exported", icon=":material/check:")
         with rst_col:
+            popover_key = widget_key(
+                context_key,
+                "cmp_reset_menu",
+                str(st.session_state[reset_menu_nonce_key]),
+            )
             with st.popover(
                 "",
                 icon=":material/delete_sweep:",
                 help="Reset chat",
+                key=popover_key,
             ):
                 if st.button(
                     "Reset left",
@@ -310,6 +330,7 @@ def render_compare_mode(
                         left_prompt_key,
                         left_pending_key,
                     )
+                    st.session_state[reset_menu_nonce_key] += 1
                     st.rerun()
                 if st.button(
                     "Reset right",
@@ -323,6 +344,7 @@ def render_compare_mode(
                         right_prompt_key,
                         right_pending_key,
                     )
+                    st.session_state[reset_menu_nonce_key] += 1
                     st.rerun()
                 if st.button(
                     "Reset both",
@@ -345,6 +367,7 @@ def render_compare_mode(
                         right_prompt_key,
                         right_pending_key,
                     )
+                    st.session_state[reset_menu_nonce_key] += 1
                     st.rerun()
 
     user_prompt = st.chat_input(
@@ -360,11 +383,11 @@ def render_compare_mode(
     for panel_state, panel_log, _panel_prompt, _p_pending, _panel_edit_key, _ in panels:
         panel_state["messages"].append({"role": "user", "content": user_prompt})
         with panel_log:
-            _render_chat_message({"role": "user", "content": user_prompt})
+            render_chat_message({"role": "user", "content": user_prompt})
 
     # Snapshot contexts before the new assistant turn is appended (needed for contrast).
     pre_gen_contexts = [
-        _build_chat_messages(panel_prompt, panel_state["messages"])
+        build_chat_messages(panel_prompt, panel_state["messages"])
         for panel_state, _panel_log, panel_prompt, _p_pending, _panel_edit_key, _ in panels
     ]
 

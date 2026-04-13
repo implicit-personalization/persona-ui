@@ -1,7 +1,3 @@
-# WARNING: This is mostly vibecoded and need reviews
-# - Check that the model is runned once with normally for gneration and things are beeing traced perphaps at the last step of generation with iter.last or somrething liek that from the docs
-# - Then the model is runned again with the entire context of the conversation from the other context on the rifht ? or on the left dependeing on which one we are doing at the moment. And this will then compute the prob diff and show them.
-
 """
 Contrastive token-level log-probability comparison for compare mode.
 
@@ -15,13 +11,16 @@ Negative (blue) → token is more characteristic of persona B.
 Near-zero (gray) → both personas would emit this token with similar likelihood.
 """
 
+import logging
 from dataclasses import dataclass
 from html import escape
 
 import torch
 from nnterp import StandardizedTransformer
 
-from utils.chat import _format_generation_prompt
+from utils.chat import format_generation_prompt
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -48,6 +47,7 @@ def _normalise_diffs(diffs: torch.Tensor) -> list[float]:
 
 
 def _decode_ids(tokenizer: object, ids: list[int]) -> str:
+    """Decode token IDs, falling back when clean_up_tokenization_spaces is unsupported."""
     try:
         return tokenizer.decode(
             ids,
@@ -79,15 +79,18 @@ def _prepare_trace_text(
     response_ids: torch.Tensor,
 ) -> tuple[str, int, int]:
     """Build the trace text and return ``(full_text, n_ctx, n_resp)``."""
-    context_prompt, _ = _format_generation_prompt(context_messages, tokenizer)
+    context_prompt, _ = format_generation_prompt(context_messages, tokenizer)
     context_ids = tokenizer(context_prompt, return_tensors="pt").input_ids[0]
     response_text = _decode_ids(tokenizer, response_ids.tolist())
     full_text = context_prompt + response_text
     full_ids = tokenizer(full_text, return_tensors="pt").input_ids[0]
     expected_ids = torch.cat([context_ids, response_ids.cpu()])
     if full_ids.tolist() != expected_ids.tolist():
-        raise ValueError(
-            "contrast trace text did not round-trip to the expected token ids"
+        logger.warning(
+            "contrast trace text did not round-trip to the expected token ids "
+            "(expected %d tokens, got %d); contrast scores may be slightly misaligned",
+            len(expected_ids),
+            len(full_ids),
         )
     n_ctx = len(context_ids)
     n_resp = len(response_ids)

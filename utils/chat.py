@@ -73,7 +73,7 @@ def _format_plain_messages(
     return "\n\n".join(lines)
 
 
-def _format_generation_prompt(
+def format_generation_prompt(
     messages: list[dict[str, str]], tokenizer: object
 ) -> tuple[str, int]:
     """Render messages into a single prompt string and count prompt tokens.
@@ -169,7 +169,7 @@ def generate_chat_reply(
     """
 
     tokenizer = model.tokenizer
-    prompt, prompt_token_count = _format_generation_prompt(messages, tokenizer)
+    prompt, prompt_token_count = format_generation_prompt(messages, tokenizer)
 
     generation_kwargs: dict[str, object] = {
         "max_new_tokens": max_new_tokens,

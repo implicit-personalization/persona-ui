@@ -17,10 +17,19 @@ from utils.helpers import (
 )
 from utils.runtime import cached_model
 
+# ── Persistence keys for surviving model / remote switches ────────────────────
+_LAST_PERSONA_ID_KEY = "chat:last_persona_id"
+_LAST_PROMPT_MODE_KEY = "chat:last_prompt_mode"
+_LAST_COMPARE_MODE_KEY = "chat:last_compare_mode"
 
-def _render_collapsible_markdown(content: str) -> None:
-    st.markdown(content)
-
+# ── Generation defaults (single source of truth) ─────────────────────────────
+_GEN_DEFAULTS = {
+    "max_new_tokens": 256,
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "top_k": 50,
+    "repetition_penalty": 1.0,
+}
 
 # ── Dialogs ───────────────────────────────────────────────────────────────────
 
@@ -91,7 +100,7 @@ def _open_system_prompt_dialog(*, prompt_key: str, current_value: str) -> None:
 # ── Message renderers ─────────────────────────────────────────────────────────
 
 
-def _render_chat_message(
+def render_chat_message(
     message: dict[str, str],
     show_contrast: bool = False,
 ) -> None:
@@ -103,7 +112,7 @@ def _render_chat_message(
         if tc is not None:
             st.html(render_contrast_html(tc))
         else:
-            _render_collapsible_markdown(message["content"])
+            st.markdown(message["content"])
 
 
 def _render_editable_message(
@@ -129,7 +138,7 @@ def _render_editable_message(
             if tc is not None:
                 st.html(render_contrast_html(tc))
             else:
-                _render_collapsible_markdown(message["content"])
+                st.markdown(message["content"])
     with edit_col:
         if st.button(
             "", icon=":material/edit:", key=f"{edit_key}_edit_{msg_index}", help="Edit"
@@ -142,7 +151,7 @@ def _render_editable_message(
             )
 
 
-def _render_system_prompt(
+def render_system_prompt(
     prompt_key: str,
     prompt_mode: str,
     active_system_prompt: str | None,
@@ -159,7 +168,7 @@ def _render_system_prompt(
     return st.session_state.get(prompt_key) or None
 
 
-def _generation_dict(gen_kwargs: dict, advanced_generation: bool) -> dict[str, object]:
+def generation_dict(gen_kwargs: dict, advanced_generation: bool) -> dict[str, object]:
     return {
         "max_new_tokens": int(gen_kwargs["max_new_tokens"]),
         "advanced_generation": bool(advanced_generation),
@@ -172,7 +181,7 @@ def _generation_dict(gen_kwargs: dict, advanced_generation: bool) -> dict[str, o
     }
 
 
-def _render_persona_prompt_controls(
+def render_persona_prompt_controls(
     personas: list[PersonaData],
     current_persona_id: str | None,
     current_prompt_mode: str,
@@ -209,7 +218,7 @@ def _render_persona_prompt_controls(
     return selected_persona, prompt_mode, changed
 
 
-def _render_chat_window(
+def render_chat_window(
     *,
     chat_log: Any,
     messages: list[dict[str, str]],
@@ -233,41 +242,16 @@ def _render_chat_window(
                     column_ratio=edit_column_ratio,
                 )
             else:
-                _render_chat_message(message, show_contrast=show_contrast)
+                render_chat_message(message, show_contrast=show_contrast)
 
 
-def _build_chat_messages(
+def build_chat_messages(
     system_prompt: str | None,
     messages: list[dict[str, str]],
 ) -> list[dict[str, str]]:
     return (
         [{"role": "system", "content": system_prompt}] if system_prompt else []
     ) + messages
-
-
-def _save_chat_export_message(
-    *,
-    model_name: str,
-    dataset_source: str,
-    persona_id: str,
-    persona_name: str | None,
-    prompt_mode: str,
-    system_prompt: str | None,
-    messages: list[dict[str, str]],
-    generation: dict[str, object],
-    panel_label: str | None = None,
-) -> None:
-    save_chat_export(
-        model_name=model_name,
-        dataset_source=dataset_source,
-        persona_id=persona_id,
-        persona_name=persona_name,
-        panel_label=panel_label,
-        prompt_mode=prompt_mode,
-        system_prompt=system_prompt,
-        messages=messages,
-        generation=generation,
-    )
 
 
 # ── Main tab entry point ───────────────────────────────────────────────────────
@@ -286,7 +270,7 @@ def _render_generation_settings(context_key: str, remote: bool) -> tuple[dict, b
                 "Max new tokens",
                 min_value=16,
                 max_value=512,
-                value=256,
+                value=_GEN_DEFAULTS["max_new_tokens"],
                 step=16,
                 key=widget_key(context_key, "max_new_tokens"),
             )
@@ -295,7 +279,7 @@ def _render_generation_settings(context_key: str, remote: bool) -> tuple[dict, b
                 "Repetition penalty",
                 min_value=0.5,
                 max_value=2.0,
-                value=1.0,
+                value=_GEN_DEFAULTS["repetition_penalty"],
                 step=0.05,
                 key=widget_key(context_key, "repetition_penalty"),
             )
@@ -313,7 +297,7 @@ def _render_generation_settings(context_key: str, remote: bool) -> tuple[dict, b
                 "Temperature",
                 min_value=0.01,
                 max_value=2.0,
-                value=1.0,
+                value=_GEN_DEFAULTS["temperature"],
                 step=0.01,
                 disabled=sampling_disabled,
                 key=widget_key(context_key, "temperature"),
@@ -323,7 +307,7 @@ def _render_generation_settings(context_key: str, remote: bool) -> tuple[dict, b
                 "Top-p",
                 min_value=0.01,
                 max_value=1.0,
-                value=1.0,
+                value=_GEN_DEFAULTS["top_p"],
                 step=0.01,
                 disabled=sampling_disabled,
                 key=widget_key(context_key, "top_p"),
@@ -333,7 +317,7 @@ def _render_generation_settings(context_key: str, remote: bool) -> tuple[dict, b
                 "Top-k (0 = off)",
                 min_value=0,
                 max_value=100,
-                value=50,
+                value=_GEN_DEFAULTS["top_k"],
                 step=1,
                 disabled=sampling_disabled,
                 key=widget_key(context_key, "top_k"),
@@ -365,12 +349,12 @@ def _render_generation_settings(context_key: str, remote: bool) -> tuple[dict, b
             st.caption("Seed is local-only and disabled for remote runs.")
 
     advanced_generation = (
-        max_new_tokens != 256
+        max_new_tokens != _GEN_DEFAULTS["max_new_tokens"]
         or use_sampling
-        or temperature != 1.0
-        or top_p != 1.0
-        or top_k != 50
-        or repetition_penalty != 1.0
+        or temperature != _GEN_DEFAULTS["temperature"]
+        or top_p != _GEN_DEFAULTS["top_p"]
+        or top_k != _GEN_DEFAULTS["top_k"]
+        or repetition_penalty != _GEN_DEFAULTS["repetition_penalty"]
         or seed is not None
     )
 
@@ -395,6 +379,14 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
 
     context_key = chat_session_key(model_name, dataset_source)
     chat_state = get_chat_state(model_name, remote, dataset_source)
+
+    # Carry over persona / prompt selections across model or remote switches.
+    if chat_state["persona_id"] is None:
+        chat_state["persona_id"] = st.session_state.get(_LAST_PERSONA_ID_KEY)
+        chat_state["prompt_mode"] = st.session_state.get(
+            _LAST_PROMPT_MODE_KEY, "templated"
+        )
+
     try:
         dataset, dataset_status = load_dataset(
             dataset_source,
@@ -416,12 +408,17 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     gen_kwargs, advanced_generation = _render_generation_settings(context_key, remote)
 
     # ── Mode toggle ───────────────────────────────────────────────────────────
+    compare_key = widget_key(context_key, "compare_mode")
+    if compare_key not in st.session_state:
+        st.session_state[compare_key] = st.session_state.get(
+            _LAST_COMPARE_MODE_KEY, False
+        )
     compare_mode = st.toggle(
         "Compare mode",
-        value=False,
-        key=widget_key(context_key, "compare_mode"),
+        key=compare_key,
         help="Side-by-side: send one message to two independent persona/prompt configurations.",
     )
+    st.session_state[_LAST_COMPARE_MODE_KEY] = compare_mode
 
     if compare_mode:
         from tabs.compare_chat import render_compare_mode
@@ -458,7 +455,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         )
         st.session_state.pop(edit_key, None)
 
-    selected_persona, prompt_mode, changed_context = _render_persona_prompt_controls(
+    selected_persona, prompt_mode, changed_context = render_persona_prompt_controls(
         personas,
         chat_state["persona_id"],
         chat_state["prompt_mode"],
@@ -466,6 +463,8 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         prompt_mode_select_key,
         column_widths=(2, 1),
     )
+    st.session_state[_LAST_PERSONA_ID_KEY] = selected_persona.id
+    st.session_state[_LAST_PROMPT_MODE_KEY] = prompt_mode
 
     active_system_prompt = resolve_system_prompt(
         persona=selected_persona,
@@ -481,13 +480,13 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     chat_log = st.container()
 
     with chat_log:
-        active_system_prompt = _render_system_prompt(
+        active_system_prompt = render_system_prompt(
             prompt_key,
             prompt_mode,
             active_system_prompt,
         )
 
-    _render_chat_window(
+    render_chat_window(
         chat_log=chat_log,
         messages=chat_state["messages"],
         chat_state=chat_state,
@@ -505,7 +504,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
                 key=export_key,
                 help="Export chat",
             ):
-                _save_chat_export_message(
+                save_chat_export(
                     model_name=model_name,
                     dataset_source=dataset_source,
                     persona_id=selected_persona.id,
@@ -513,7 +512,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
                     prompt_mode=prompt_mode,
                     system_prompt=active_system_prompt,
                     messages=chat_state["messages"],
-                    generation=_generation_dict(gen_kwargs, advanced_generation),
+                    generation=generation_dict(gen_kwargs, advanced_generation),
                 )
                 st.toast("Exported", icon=":material/check:")
         with rst_col:
@@ -538,7 +537,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     if not st.session_state.pop(pending_key, False):
         return
 
-    messages = _build_chat_messages(active_system_prompt, chat_state["messages"])
+    messages = build_chat_messages(active_system_prompt, chat_state["messages"])
 
     with st.spinner("Generating reply..."):
         model = cached_model(model_name=model_name, remote=remote)
@@ -559,15 +558,4 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
 
     chat_state["messages"].append({"role": "assistant", "content": reply.text})
     chat_state["past_key_values"] = reply.past_key_values if not remote else None
-
-    save_chat_export(
-        model_name=model_name,
-        dataset_source=dataset_source,
-        persona_id=selected_persona.id,
-        persona_name=getattr(selected_persona, "name", None),
-        prompt_mode=prompt_mode,
-        system_prompt=active_system_prompt,
-        messages=chat_state["messages"],
-        generation=_generation_dict(gen_kwargs, advanced_generation),
-    )
     st.rerun()

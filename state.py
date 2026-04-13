@@ -1,6 +1,7 @@
 import streamlit as st
 
 _CHAT_STATE_PREFIX = "chat_state::"
+_CHAT_KEYS_REGISTRY = "chat_state::_registered_keys"
 
 
 def chat_session_key(model_name: str, dataset_source: str) -> str:
@@ -37,13 +38,9 @@ def reset_chat_context_state(
 def _evict_inactive_kv_caches(active_key: str) -> None:
     """Drop past_key_values from every chat context except the active one."""
 
-    for key in st.session_state:
-        if (
-            isinstance(key, str)
-            and key.startswith(_CHAT_STATE_PREFIX)
-            and key != active_key
-        ):
-            state = st.session_state[key]
+    for key in st.session_state.get(_CHAT_KEYS_REGISTRY, ()):
+        if key != active_key:
+            state = st.session_state.get(key)
             if isinstance(state, dict) and state.get("past_key_values") is not None:
                 state["past_key_values"] = None
 
@@ -54,13 +51,21 @@ def get_chat_state(
     """Return the mutable chat state for the active context."""
 
     key = chat_session_key(model_name, dataset_source)
+    registry = st.session_state.get(_CHAT_KEYS_REGISTRY)
+    if registry is None:
+        registry = set()
+        st.session_state[_CHAT_KEYS_REGISTRY] = registry
+    registry.add(key)
+
     state = st.session_state.get(key)
     if state is None:
         state = default_chat_state()
         st.session_state[key] = state
     else:
-        for default_key, default_value in default_chat_state().items():
-            state.setdefault(default_key, default_value)
+        state.setdefault("messages", [])
+        state.setdefault("persona_id", None)
+        state.setdefault("prompt_mode", "templated")
+        state.setdefault("past_key_values", None)
     _evict_inactive_kv_caches(key)
     if remote and state.get("past_key_values") is not None:
         state["past_key_values"] = None
