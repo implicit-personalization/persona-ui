@@ -1,8 +1,15 @@
+import html
 from typing import Literal, cast
 
 import streamlit as st
+from persona_data.prompts import format_roleplay_prompt
 from persona_vectors.artifacts import SUPPORTED_VARIANTS
-from persona_vectors.extraction import run_extraction
+from persona_vectors.extraction import (
+    MaskStrategy,
+    PreparedInput,
+    prepare_inputs,
+    run_extraction,
+)
 
 from utils.datasets import load_dataset
 from utils.helpers import (
@@ -20,6 +27,7 @@ _LAST_PERSONA_IDS_KEY = "extract:last_persona_ids"
 _LAST_QA_TYPE_KEY = "extract:last_qa_type"
 _LAST_DIFFICULTY_KEY = "extract:last_difficulty"
 _LAST_MAX_QUESTIONS_KEY = "extract:last_max_questions"
+_LAST_MASK_STRATEGY_KEY = "extract:last_mask_strategy"
 
 _QA_TYPE_OPTIONS = ["all", "explicit", "implicit"]
 
@@ -28,6 +36,60 @@ def _extract_widget_key(
     model_name: str, remote: bool, dataset_source: str, suffix: str
 ) -> str:
     return widget_key("extract", str(remote), model_name, dataset_source, suffix)
+
+
+_TOKEN_LEGEND = (
+    '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.8em;margin-bottom:8px">'
+    '<span style="background:#86efac;color:black;padding:1px 6px;border-radius:3px">masked</span>'
+    '<span style="color:#22d3ee;padding:1px 6px">response</span>'
+    '<span style="color:#d946ef;font-weight:bold;padding:1px 6px">special</span>'
+    '<span style="color:#9ca3af;padding:1px 6px">prompt</span>'
+    "</div>"
+)
+
+_MAX_PREVIEW_SAMPLES = 3
+
+
+def _render_sample_tokens_html(
+    p: PreparedInput, tokenizer, *, max_tokens: int = 200
+) -> str:
+    """Build an HTML token sequence for a single PreparedInput."""
+    special_ids = set(tokenizer.all_special_ids)
+    ids = p.input_ids.tolist()
+    tokens = tokenizer.convert_ids_to_tokens(ids)
+
+    if len(ids) > max_tokens:
+        head = max_tokens // 2
+        tail = max_tokens - head
+        indices: list[int | None] = (
+            list(range(head)) + [None] + list(range(len(ids) - tail, len(ids)))
+        )
+    else:
+        indices = list(range(len(ids)))
+
+    spans: list[str] = []
+    for idx in indices:
+        if idx is None:
+            spans.append('<span style="color:#9ca3af"> … </span>')
+            continue
+        raw = tokens[idx].replace("▁", " ").replace("Ċ", "\n")
+        escaped = html.escape(raw)
+        if p.token_mask[idx]:
+            style = "background:#86efac;color:black;border-radius:2px"
+        elif ids[idx] in special_ids:
+            style = "color:#d946ef;font-weight:bold"
+        elif idx >= p.answer_start:
+            style = "color:#22d3ee"
+        else:
+            style = "color:#9ca3af"
+        spans.append(f'<span style="{style}">{escaped}</span>')
+
+    return (
+        f'<pre style="white-space:pre-wrap;font-size:0.82em;line-height:1.5;'
+        f"background:#0e1117;padding:8px 10px;border-radius:6px;"
+        f'border:1px solid #333;margin:0">'
+        f"{''.join(spans)}</pre>"
+    )
 
 
 def _render_local_dataset_uploads() -> None:
@@ -154,6 +216,27 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
             st.session_state[_LAST_DIFFICULTY_KEY] = difficulty_values
             qa_filter_difficulty = difficulty_values if difficulty_values else None
 
+        st.caption("Extraction settings")
+        last_strategy = st.session_state.get(
+            _LAST_MASK_STRATEGY_KEY, MaskStrategy.RESPONSE_MEAN.value
+        )
+        strategy_options = list(MaskStrategy)
+        strategy_index = next(
+            (i for i, s in enumerate(strategy_options) if s.value == last_strategy),
+            0,
+        )
+        mask_strategy = st.selectbox(
+            "Mask strategy",
+            options=strategy_options,
+            index=strategy_index,
+            format_func=lambda s: s.value.replace("_", " ").title(),
+            key=_extract_widget_key(
+                model_name, remote, dataset_source, "mask_strategy"
+            ),
+            help="Which tokens contribute to the averaged hidden state.",
+        )
+        st.session_state[_LAST_MASK_STRATEGY_KEY] = mask_strategy.value
+
         runs, skipped = [], []
         for persona in selected_personas:
             qa = list(
@@ -187,7 +270,48 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         )
         st.session_state[_LAST_MAX_QUESTIONS_KEY] = max_questions
 
-    run_clicked = st.button("Run extraction", type="primary")
+    run_col, preview_col, _spacer = st.columns([1, 1, 4], gap="small")
+    with run_col:
+        run_clicked = st.button(
+            "Run extraction", type="primary", use_container_width=True
+        )
+    with preview_col:
+        preview_clicked = st.button("Preview tokens", use_container_width=True)
+
+    if preview_clicked:
+        with st.spinner("Loading tokenizer..."):
+            model = cached_model(model_name=model_name, remote=remote)
+        st.markdown(_TOKEN_LEGEND, unsafe_allow_html=True)
+        for persona, qa_pairs in runs:
+            for variant in selected_variants:
+                system_prompt = format_roleplay_prompt(
+                    getattr(persona, f"{variant}_view"), mode="mc"
+                )
+                prepared = prepare_inputs(
+                    tokenizer=model.tokenizer,
+                    system_prompt=system_prompt,
+                    qa_pairs=qa_pairs[:max_questions],
+                    mask_strategy=mask_strategy,
+                )
+                st.caption(f"{persona.name} · {prompt_variant_label(variant)}")
+                shown = prepared[:_MAX_PREVIEW_SAMPLES]
+                for i, p in enumerate(shown):
+                    question = (
+                        p.question if len(p.question) <= 60 else p.question[:57] + "..."
+                    )
+                    seq_len = int(p.input_ids.shape[0])
+                    masked = int(p.token_mask.sum())
+                    label = f"sample {i} — {question}  (len={seq_len}, masked={masked})"
+                    with st.expander(label):
+                        st.markdown(
+                            _render_sample_tokens_html(p, model.tokenizer),
+                            unsafe_allow_html=True,
+                        )
+                if len(prepared) > _MAX_PREVIEW_SAMPLES:
+                    remaining = len(prepared) - _MAX_PREVIEW_SAMPLES
+                    st.caption(f"… and {remaining} more sample(s) not shown.")
+        return
+
     if not run_clicked:
         return
 
@@ -220,6 +344,7 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
                     persona=persona,
                     qa_pairs=qa_pairs[:max_questions],
                     variants=(variant,),
+                    mask_strategy=mask_strategy,
                     remote=remote,
                     on_status=_on_ndif_status if remote else None,
                 )
