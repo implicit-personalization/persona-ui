@@ -156,6 +156,13 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         )
         return
 
+    if not getattr(dataset, "supports_qa", False):
+        st.info(
+            "This dataset source is persona-only. Chat is supported, but Extract "
+            "currently requires QA pairs."
+        )
+        return
+
     last_persona_ids: set[str] = set(st.session_state.get(_LAST_PERSONA_IDS_KEY, []))
     default_personas = [p for p in personas if p.id in last_persona_ids] or [
         personas[0]
