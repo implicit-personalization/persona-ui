@@ -16,7 +16,11 @@ MODE_LABELS = list(VARIANT_LABELS.values())
 # Reverse lookup: label -> key
 MODE_LABEL_TO_KEY = {v: k for k, v in VARIANT_LABELS.items()}
 
-DATASET_SOURCES = ["HuggingFace: synth-persona", "Local JSONL upload"]
+DATASET_SOURCES = [
+    "HuggingFace: synth-persona",
+    "HuggingFace: Nemotron-Personas-France",
+    "Local JSONL upload",
+]
 ANALYSIS_MODES = ["Cosine similarity", "PCA", "UMAP"]
 
 ANALYSIS_HELP_TEXT = {

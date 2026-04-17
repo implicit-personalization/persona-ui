@@ -6,6 +6,7 @@ from tempfile import mkdtemp
 from typing import Any
 
 import streamlit as st
+from persona_data.nemotron_personas import NemotronPersonasFranceDataset
 from persona_data.synth_persona import PersonaDataset as LocalPersonaDataset
 from persona_data.synth_persona import SynthPersonaDataset
 
@@ -17,6 +18,13 @@ def cached_hf_dataset() -> SynthPersonaDataset:
     """Load the default SynthPersona HuggingFace dataset once."""
 
     return SynthPersonaDataset()
+
+
+@st.cache_resource(show_spinner=False)
+def cached_nemotron_fr_dataset() -> NemotronPersonasFranceDataset:
+    """Load a sampled French persona-only dataset once."""
+
+    return NemotronPersonasFranceDataset(sample_size=200, offset=0)
 
 
 def _upload_cache_dir() -> Path:
@@ -46,11 +54,20 @@ def load_dataset(
     dataset_source: str,
     personas_file: Any = None,
     qa_file: Any = None,
-) -> tuple[SynthPersonaDataset | LocalPersonaDataset, str]:
+) -> tuple[SynthPersonaDataset | LocalPersonaDataset | NemotronPersonasFranceDataset, str]:
     """Load the selected dataset source for the UI."""
 
     if dataset_source == DATASET_SOURCES[0]:
         return cached_hf_dataset(), "SynthPersona"
+    if dataset_source == DATASET_SOURCES[1]:
+        dataset = cached_nemotron_fr_dataset()
+        return (
+            dataset,
+            (
+                "Nemotron-Personas-France "
+                f"(sampled {len(dataset)} personas from {dataset.split}, offset={dataset.offset})"
+            ),
+        )
 
     if personas_file is None or qa_file is None:
         raise ValueError("Upload both personas.jsonl and qa.jsonl files")
