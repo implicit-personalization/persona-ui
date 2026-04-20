@@ -1,10 +1,24 @@
 import json
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from persona_data.environment import get_artifacts_dir
 
 from utils.helpers import slugify
+
+
+def _serialise_message(message: dict[str, object]) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "role": message["role"],
+        "content": message["content"],
+    }
+    for key in ("_contrast",):
+        value = message.get(key)
+        if value is None:
+            continue
+        payload[key] = asdict(value) if is_dataclass(value) else value
+    return payload
 
 
 def save_chat_export(
@@ -49,7 +63,7 @@ def save_chat_export(
         "messages": (
             [{"role": "system", "content": system_prompt}] if system_prompt else []
         )
-        + messages,
+        + [_serialise_message(message) for message in messages],
     }
 
     export_dir = (

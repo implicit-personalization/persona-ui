@@ -21,7 +21,7 @@ A web app built on top of [persona-vectors](../persona-vectors) that provides th
 
 - **Chat** — interactive conversations with a model using persona-based system prompts (templated or biography)
 - **Compare** — load saved activations and explore layer-wise cosine similarity, PCA, and UMAP projections
-- **Extract** — run activation extraction from HuggingFace or a local JSONL dataset directly from the browser
+- **Extract** — run activation extraction from HuggingFace persona datasets or a local JSONL dataset directly from the browser
 
 ## Repository Layout
 

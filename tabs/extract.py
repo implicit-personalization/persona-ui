@@ -41,53 +41,74 @@ def _extract_widget_key(
 _TOKEN_LEGEND = (
     '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.8em;margin-bottom:8px">'
     '<span style="background:#86efac;color:black;padding:1px 6px;border-radius:3px">masked</span>'
+    '<span style="color:#fde047;padding:1px 6px">question</span>'
     '<span style="color:#22d3ee;padding:1px 6px">response</span>'
     '<span style="color:#d946ef;font-weight:bold;padding:1px 6px">special</span>'
-    '<span style="color:#9ca3af;padding:1px 6px">prompt</span>'
+    '<span style="color:#9ca3af;padding:1px 6px">template</span>'
     "</div>"
 )
 
 _MAX_PREVIEW_SAMPLES = 3
 
 
+def _token_style_for_index(
+    p: PreparedInput, token_idx: int, special_ids: set[int]
+) -> str:
+    if p.spans.response.token_start <= token_idx < p.spans.response.token_end:
+        style = "color:#22d3ee"
+    elif p.spans.question.token_start <= token_idx < p.spans.question.token_end:
+        style = "color:#fde047"
+    elif p.spans.template.token_start <= token_idx < p.spans.template.token_end:
+        style = "color:#9ca3af"
+    else:
+        style = "color:#9ca3af"
+
+    if int(p.input_ids[token_idx]) in special_ids:
+        style = "color:#d946ef;font-weight:bold"
+    if p.token_mask[token_idx]:
+        style = f"{style};background:#86efac;border-radius:2px;padding:0 1px"
+    return style
+
+
 def _render_sample_tokens_html(
     p: PreparedInput, tokenizer, *, max_tokens: int = 200
 ) -> str:
-    """Build an HTML token sequence for a single PreparedInput."""
+    """Build an HTML token sequence using the persona-vectors preview layout."""
     special_ids = set(tokenizer.all_special_ids)
-    ids = p.input_ids.tolist()
-    tokens = tokenizer.convert_ids_to_tokens(ids)
+    seq_len = int(p.input_ids.shape[0])
+    head = max_tokens if max_tokens > 0 else seq_len
+    tail = 8 if max_tokens <= 0 else max(8, max_tokens // 4)
+    answer_extra = 8 if max_tokens <= 0 else max(8, max_tokens // 4)
 
-    if len(ids) > max_tokens:
-        head = max_tokens // 2
-        tail = max_tokens - head
-        indices: list[int | None] = (
-            list(range(head)) + [None] + list(range(len(ids) - tail, len(ids)))
-        )
-    else:
-        indices = list(range(len(ids)))
+    prefix_end = min(p.spans.template.token_start + head, seq_len)
+    tail_start = min(max(prefix_end, p.spans.template.token_end - tail), seq_len)
+    answer_end = min(seq_len, p.spans.response.token_end + answer_extra)
+
+    indices: list[int | None] = list(range(0, prefix_end))
+    if prefix_end < tail_start:
+        indices.append(None)
+    indices.extend(range(tail_start, answer_end))
+    if answer_end < seq_len:
+        indices.append(None)
 
     spans: list[str] = []
     for idx in indices:
         if idx is None:
             spans.append('<span style="color:#9ca3af"> … </span>')
             continue
-        raw = tokens[idx].replace("▁", " ").replace("Ċ", "\n")
+        char_start, char_end = p.offset_mapping[idx]
+        raw = p.prompt_text[char_start:char_end]
+        if not raw:
+            raw = tokenizer.convert_ids_to_tokens([int(p.input_ids[idx])])[0]
         escaped = html.escape(raw)
-        if p.token_mask[idx]:
-            style = "background:#86efac;color:black;border-radius:2px"
-        elif ids[idx] in special_ids:
-            style = "color:#d946ef;font-weight:bold"
-        elif idx >= p.answer_start:
-            style = "color:#22d3ee"
-        else:
-            style = "color:#9ca3af"
-        spans.append(f'<span style="{style}">{escaped}</span>')
+        spans.append(
+            f'<span style="{_token_style_for_index(p, idx, special_ids)}">{escaped}</span>'
+        )
 
     return (
-        f'<pre style="white-space:pre-wrap;font-size:0.82em;line-height:1.5;'
-        f"background:#0e1117;padding:8px 10px;border-radius:6px;"
-        f'border:1px solid #333;margin:0">'
+        '<pre style="white-space:pre-wrap;font-size:0.82em;line-height:1.5;'
+        "background:#0e1117;padding:8px 10px;border-radius:6px;"
+        'border:1px solid #333;margin:0">'
         f"{''.join(spans)}</pre>"
     )
 
@@ -146,6 +167,10 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         st.info(
             "Upload both JSONL files or switch to the built-in SynthPersona source."
         )
+        return
+
+    if not getattr(dataset, "supports_qa", True):
+        st.info("This dataset is persona-only for now. Use Chat to browse personas.")
         return
 
     personas = list(dataset)
@@ -218,7 +243,7 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
 
         st.caption("Extraction settings")
         last_strategy = st.session_state.get(
-            _LAST_MASK_STRATEGY_KEY, MaskStrategy.RESPONSE_MEAN.value
+            _LAST_MASK_STRATEGY_KEY, MaskStrategy.ANSWER_MEAN.value
         )
         strategy_options = list(MaskStrategy)
         strategy_index = next(
@@ -284,9 +309,12 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         st.markdown(_TOKEN_LEGEND, unsafe_allow_html=True)
         for persona, qa_pairs in runs:
             for variant in selected_variants:
-                system_prompt = format_roleplay_prompt(
-                    getattr(persona, f"{variant}_view"), mode="mc"
-                )
+                if variant == "baseline":
+                    system_prompt = format_roleplay_prompt()
+                else:
+                    system_prompt = format_roleplay_prompt(
+                        getattr(persona, f"{variant}_view")
+                    )
                 prepared = prepare_inputs(
                     tokenizer=model.tokenizer,
                     system_prompt=system_prompt,

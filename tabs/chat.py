@@ -133,6 +133,7 @@ def _render_editable_message(
     msg_col, edit_col = st.columns(
         list(column_ratio), gap="xsmall", vertical_alignment="center"
     )
+
     with msg_col:
         with st.chat_message(role):
             if tc is not None:
@@ -261,7 +262,7 @@ def _render_generation_settings(context_key: str, remote: bool) -> tuple[dict, b
     """Render the Advanced generation settings expander.
 
     Returns ``(gen_kwargs, advanced_generation)`` where ``advanced_generation``
-    is True when any setting differs from its default.
+    is True when any generation setting differs from its default.
     """
     with st.expander("Advanced", expanded=False):
         config_col1, config_col2 = st.columns([2, 1])

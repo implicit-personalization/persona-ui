@@ -64,6 +64,14 @@ def render_compare_mode(
     advanced_generation: bool,
 ) -> None:
     """Render the full side-by-side comparison UI."""
+    model: StandardizedTransformer | None = None
+
+    def _get_model() -> StandardizedTransformer:
+        nonlocal model
+        if model is None:
+            model = cached_model(model_name=model_name, remote=remote)
+        return model
+
     contrast_key = widget_key(context_key, "token_contrast")
     contrast_enabled = st.toggle(
         "Token contrast",
@@ -176,7 +184,7 @@ def render_compare_mode(
         if st.session_state.pop(p_pending, False)
     ]
     if regen_panels:
-        model = cached_model(model_name=model_name, remote=remote)
+        model = _get_model()
 
         results: list[ChatReply | Exception] = []
         with st.spinner("Regenerating..."):
@@ -219,7 +227,7 @@ def render_compare_mode(
             if msg.get("_needs_contrast") and msg.get("role") == "assistant"
         ]
         if pending_edits:
-            model = cached_model(model_name=model_name, remote=remote)
+            model = _get_model()
             label_a = persona_label(left_persona)
             label_b = persona_label(right_persona)
             with st.spinner("Recomputing token contrast…"):
