@@ -2,7 +2,7 @@ import html
 from typing import Literal, cast
 
 import streamlit as st
-from persona_data.prompts import format_roleplay_prompt
+from persona_data.prompts import system_prompt_for_variant
 from persona_vectors.artifacts import SUPPORTED_VARIANTS
 from persona_vectors.extraction import (
     MaskStrategy,
@@ -58,8 +58,6 @@ def _token_style_for_index(
         style = "color:#22d3ee"
     elif p.spans.question.token_start <= token_idx < p.spans.question.token_end:
         style = "color:#fde047"
-    elif p.spans.template.token_start <= token_idx < p.spans.template.token_end:
-        style = "color:#9ca3af"
     else:
         style = "color:#9ca3af"
 
@@ -76,13 +74,11 @@ def _render_sample_tokens_html(
     """Build an HTML token sequence using the persona-vectors preview layout."""
     special_ids = set(tokenizer.all_special_ids)
     seq_len = int(p.input_ids.shape[0])
-    head = max_tokens if max_tokens > 0 else seq_len
-    tail = 8 if max_tokens <= 0 else max(8, max_tokens // 4)
-    answer_extra = 8 if max_tokens <= 0 else max(8, max_tokens // 4)
+    edge = max(8, max_tokens // 4)
 
-    prefix_end = min(p.spans.template.token_start + head, seq_len)
-    tail_start = min(max(prefix_end, p.spans.template.token_end - tail), seq_len)
-    answer_end = min(seq_len, p.spans.response.token_end + answer_extra)
+    prefix_end = min(p.spans.template.token_start + max_tokens, seq_len)
+    tail_start = min(max(prefix_end, p.spans.template.token_end - edge), seq_len)
+    answer_end = min(seq_len, p.spans.response.token_end + edge)
 
     indices: list[int | None] = list(range(0, prefix_end))
     if prefix_end < tail_start:
@@ -201,7 +197,7 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
     with st.expander("Advanced", expanded=False):
         st.caption("Filters")
 
-        col1, col2, col3 = st.columns([2, 2, 1])
+        col1, col2, _ = st.columns([2, 2, 1])
         with col1:
             last_qa_type = st.session_state.get(_LAST_QA_TYPE_KEY, "all")
             qa_type_index = (
@@ -309,12 +305,7 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         st.markdown(_TOKEN_LEGEND, unsafe_allow_html=True)
         for persona, qa_pairs in runs:
             for variant in selected_variants:
-                if variant == "baseline":
-                    system_prompt = format_roleplay_prompt()
-                else:
-                    system_prompt = format_roleplay_prompt(
-                        getattr(persona, f"{variant}_view")
-                    )
+                system_prompt = system_prompt_for_variant(persona, variant)
                 prepared = prepare_inputs(
                     tokenizer=model.tokenizer,
                     system_prompt=system_prompt,

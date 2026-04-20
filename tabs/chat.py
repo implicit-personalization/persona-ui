@@ -361,15 +361,15 @@ def _render_generation_settings(context_key: str, remote: bool) -> tuple[dict, b
 
     do_sample = bool(use_sampling)
     generation_seed = seed if do_sample and seed is not None and not remote else None
-    gen_kwargs = dict(
-        max_new_tokens=int(max_new_tokens),
-        do_sample=do_sample,
-        temperature=temperature,
-        top_p=top_p,
-        top_k=top_k,
-        repetition_penalty=repetition_penalty,
-        seed=generation_seed,
-    )
+    gen_kwargs = {
+        "max_new_tokens": int(max_new_tokens),
+        "do_sample": do_sample,
+        "temperature": temperature,
+        "top_p": top_p,
+        "top_k": top_k,
+        "repetition_penalty": repetition_penalty,
+        "seed": generation_seed,
+    }
     return gen_kwargs, advanced_generation
 
 

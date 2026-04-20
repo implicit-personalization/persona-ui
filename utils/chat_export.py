@@ -13,11 +13,9 @@ def _serialise_message(message: dict[str, object]) -> dict[str, object]:
         "role": message["role"],
         "content": message["content"],
     }
-    for key in ("_contrast",):
-        value = message.get(key)
-        if value is None:
-            continue
-        payload[key] = asdict(value) if is_dataclass(value) else value
+    contrast = message.get("_contrast")
+    if contrast is not None:
+        payload["_contrast"] = asdict(contrast) if is_dataclass(contrast) else contrast
     return payload
 
 

@@ -5,7 +5,11 @@ from typing import Literal
 
 import torch
 from nnterp import StandardizedTransformer
-from persona_data.prompts import format_roleplay_prompt, normalize_messages
+from persona_data.prompts import (
+    _normalize_messages,
+    format_roleplay_prompt,
+    system_prompt_for_variant,
+)
 from persona_data.synth_persona import PersonaData
 
 logger = logging.getLogger(__name__)
@@ -33,23 +37,16 @@ def resolve_system_prompt(
         The rendered system prompt string.
     """
 
-    if persona is None:
+    if persona is None or mode == "empty":
         return ""
-
-    if mode == "empty":
-        return ""
-    if mode == "templated":
-        return format_roleplay_prompt(persona.templated_view, mode="conversational")
-    if mode == "biography":
-        return format_roleplay_prompt(persona.biography_view, mode="conversational")
     if mode == "custom":
         return format_roleplay_prompt(mode="conversational")
+    if mode in ("templated", "biography"):
+        return system_prompt_for_variant(persona, mode, mode="conversational")
     raise ValueError(f"Unsupported system prompt mode: {mode}")
 
 
-def _format_plain_messages(
-    messages: list[dict[str, str]], add_generation_prompt: bool
-) -> str:
+def _format_plain_messages(messages: list[dict[str, str]]) -> str:
     """Format messages as plain ``Role: content`` text, used as a last-resort fallback."""
     lines: list[str] = []
 
@@ -67,7 +64,7 @@ def _format_plain_messages(
         else:
             lines.append(f"{role.title()}: {content}")
 
-    if add_generation_prompt and (not lines or not lines[-1].startswith("Assistant:")):
+    if not lines or not lines[-1].startswith("Assistant:"):
         lines.append("Assistant:")
 
     return "\n\n".join(lines)
@@ -91,7 +88,7 @@ def format_generation_prompt(
         logger.debug(
             "Chat template failed on raw messages, trying normalized", exc_info=True
         )
-        messages = normalize_messages(messages)
+        messages = _normalize_messages(messages)
 
         try:
             prompt = tokenizer.apply_chat_template(
@@ -104,10 +101,7 @@ def format_generation_prompt(
                 "Chat template failed on normalized messages, falling back to plain format",
                 exc_info=True,
             )
-            prompt = _format_plain_messages(
-                messages,
-                add_generation_prompt=True,
-            )
+            prompt = _format_plain_messages(messages)
 
     prompt_token_count = tokenizer(prompt, return_tensors="pt").input_ids.shape[1]
     return prompt, prompt_token_count
@@ -194,7 +188,7 @@ def generate_chat_reply(
         with model.generate(prompt, remote=remote, **generation_kwargs) as tracer:
             generated = tracer.result.save()
 
-    if hasattr(generated, "value") and getattr(generated, "value") is not None:
+    if getattr(generated, "value", None) is not None:
         generated = generated.value
 
     sequences = generated.sequences if hasattr(generated, "sequences") else generated

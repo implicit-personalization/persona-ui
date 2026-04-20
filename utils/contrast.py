@@ -154,7 +154,7 @@ def _score_passes(
             picked = log_probs.gather(1, targets).view(-1)
             out = picked.detach().cpu().save()
 
-        if hasattr(out, "value") and getattr(out, "value") is not None:
+        if getattr(out, "value", None) is not None:
             out = out.value
         if not isinstance(out, torch.Tensor):
             raise TypeError(
@@ -162,17 +162,10 @@ def _score_passes(
             )
         return out.detach().cpu()
 
-    saved = [
-        _score_pass(full_text, n_ctx, n_resp, target_ids)
-        for _key, full_text, n_ctx, n_resp, target_ids in specs
-    ]
-
-    if len(saved) != len(specs):
-        raise RuntimeError(
-            f"contrast scoring returned {len(saved)} result(s) for {len(specs)} spec(s)"
-        )
-
-    return {spec[0]: tensor for spec, tensor in zip(specs, saved)}
+    return {
+        key: _score_pass(full_text, n_ctx, n_resp, target_ids)
+        for key, full_text, n_ctx, n_resp, target_ids in specs
+    }
 
 
 def _specs_for_response(
@@ -304,9 +297,9 @@ def render_contrast_html(result: TokenContrast) -> str:
         + "".join(spans)
         + '<div style="margin-top:10px;font-size:0.72em;color:#888;'
         + 'display:flex;gap:12px;flex-wrap:wrap;">'
-        + f'<span><span style="background:rgba(210,60,60,0.45);'
+        + '<span><span style="background:rgba(210,60,60,0.45);'
         + f'padding:1px 6px;border-radius:2px;">&thinsp;</span>&nbsp;{la}</span>'
-        + f'<span><span style="background:rgba(50,110,210,0.45);'
+        + '<span><span style="background:rgba(50,110,210,0.45);'
         + f'padding:1px 6px;border-radius:2px;">&thinsp;</span>&nbsp;{lb}</span>'
         + '<span style="color:#aaa;">gray = shared by both</span>'
         + "</div>"
