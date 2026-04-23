@@ -33,52 +33,50 @@ class ProjectionConfig:
     project_fn: Callable[[torch.Tensor], torch.Tensor]
 
 
-@dataclass(frozen=True)
-class _EmbeddingConfig:
-    variant: str
-    persona_ids: list[str]
-    persona_names: dict[str, str]
-    selected_layers: list[int]
-    persona_key: str
-
-
 _PROJECTION_CONFIGS: dict[str, ProjectionConfig] = {
     "PCA": ProjectionConfig("PCA", "PC1", "PC2", project_pca),
     "UMAP": ProjectionConfig("UMAP", "UMAP 1", "UMAP 2", project_umap),
 }
 
+_VARIANT_MODES: dict[str, tuple[str, ...]] = {
+    "Template": ("templated",),
+    "Biography": ("biography",),
+    "Template + Biography": ("templated", "biography"),
+}
+
 _list_layers_cached = st.cache_data(show_spinner=False)(list_available_layers)
 
-# Cross-model/NDIF-switch persistence keys — written on every render so that
-# when the model changes (and widget keys change) the last selection is reused
-# as the default, filtered to whatever is available for the new model.
-_LAST_PERSONAS_KEY = "compare:last_personas"
-_LAST_LAYERS_KEY = "compare:last_layers"
+# Keep compare-tab selection state separate so projection defaults do not
+# overwrite cosine similarity defaults.
+_LAST_COSINE_PERSONAS_KEY = "compare:last_personas:cosine"
+_LAST_PROJECTION_PERSONAS_KEY = "compare:last_personas:projection"
+_LAST_PROJECTION_LAYERS_KEY = "compare:last_layers:projection"
 
 
-def _load_embedding_samples(
+def _load_mean_samples(
     store: ActivationStore,
     persona_ids: list[str],
-    variant: str,
+    variants: list[str],
     selected_layers: list[int],
-    project_fn: Callable[[torch.Tensor], torch.Tensor],
     persona_names: dict[str, str],
+    project_fn: Callable[[torch.Tensor], torch.Tensor],
+    multi_variant: bool,
     progress_fn: Callable[[int, int, int], None] | None = None,
 ) -> tuple[list[tuple[int, torch.Tensor, list[str], list[str]]], list[str]]:
-    """Load samples for 2D projections without re-reading each layer from disk."""
+    """Compute per-persona mean activations and project to 2D per layer."""
 
     plots: list[tuple[int, torch.Tensor, list[str], list[str]]] = []
     errors: list[str] = []
-    vectors_by_persona: dict[str, torch.Tensor] = {}
+    loaded: dict[tuple[str, str], torch.Tensor] = {}
 
-    for persona_id in persona_ids:
-        try:
-            vectors, _ = store.load(variant, persona_id)
-        except (FileNotFoundError, KeyError, OSError, ValueError) as exc:
-            errors.append(f"{persona_id} / {variant}: {exc}")
-            continue
-
-        vectors_by_persona[persona_id] = vectors
+    for variant in variants:
+        for persona_id in persona_ids:
+            try:
+                vectors, _ = store.load(variant, persona_id)
+            except (FileNotFoundError, KeyError, OSError, ValueError) as exc:
+                errors.append(f"{persona_id} / {variant}: {exc}")
+                continue
+            loaded[(variant, persona_id)] = vectors
 
     total_layers = len(selected_layers)
     for idx, layer_idx in enumerate(selected_layers, start=1):
@@ -86,33 +84,34 @@ def _load_embedding_samples(
         labels: list[str] = []
         hover_text: list[str] = []
 
-        for persona_id, vectors in vectors_by_persona.items():
-            if layer_idx >= vectors.shape[1]:
-                errors.append(f"{persona_id} / {variant}: missing layer {layer_idx}")
-                continue
+        for variant in variants:
+            variant_lbl = prompt_variant_label(variant)
+            for persona_id in persona_ids:
+                vectors = loaded.get((variant, persona_id))
+                if vectors is None:
+                    continue
+                if layer_idx >= vectors.shape[1]:
+                    errors.append(
+                        f"{persona_id} / {variant}: missing layer {layer_idx}"
+                    )
+                    continue
+                mean_vec = vectors[:, layer_idx, :].float().mean(dim=0)
+                samples.append(mean_vec)
+                display_name = persona_names.get(persona_id) or persona_id
+                labels.append(variant_lbl if multi_variant else "Personas")
+                hover_text.append(f"<b>{display_name}</b><br>{variant_lbl}")
 
-            layer_vectors = vectors[:, layer_idx, :]
-            display_name = persona_names.get(persona_id) or persona_id
-            samples.append(layer_vectors)
-            labels.extend([display_name] * layer_vectors.shape[0])
-            hover_text.extend(
-                [f"<b>{display_name}</b><br>{variant}"] * layer_vectors.shape[0]
+        if len(samples) < 2:
+            errors.append(
+                f"Layer {layer_idx}: need at least 2 persona means to project"
             )
-
-        if not samples:
-            errors.append(f"Layer {layer_idx}: no selected personas have this layer")
         else:
-            all_samples = torch.cat(samples, dim=0)
-            if all_samples.shape[0] < 2:
-                errors.append(
-                    f"Layer {layer_idx}: need at least 2 samples after filtering selected personas"
-                )
-            else:
-                try:
-                    coords = project_fn(all_samples)
-                    plots.append((layer_idx, coords, labels, hover_text))
-                except Exception as exc:
-                    errors.append(f"Layer {layer_idx}: {exc}")
+            try:
+                stacked = torch.stack(samples, dim=0)
+                coords = project_fn(stacked)
+                plots.append((layer_idx, coords, labels, hover_text))
+            except Exception as exc:
+                errors.append(f"Layer {layer_idx}: {exc}")
 
         if progress_fn is not None:
             progress_fn(idx, total_layers, len(plots))
@@ -151,6 +150,10 @@ def _render_embedding_results(
 def _select_artifact_personas(
     store: ActivationStore,
     variants: list[str],
+    *,
+    widget_scope: str,
+    remember_key: str,
+    default_all: bool = False,
 ) -> tuple[list[str], dict[str, str]]:
     persona_options = list_available_personas(
         store.root_dir, store.model_name, variants
@@ -167,10 +170,22 @@ def _select_artifact_personas(
             st.info("No personas found for this model yet. Run extraction first.")
         return [], persona_names
 
-    last_personas: list[str] = st.session_state.get(_LAST_PERSONAS_KEY, [])
-    default_personas = [
-        p for p in last_personas if p in persona_options
-    ] or persona_options[:1]
+    last_personas: list[str] = st.session_state.get(remember_key, [])
+    default_personas = [p for p in last_personas if p in persona_options]
+    if not default_personas:
+        default_personas = persona_options if default_all else persona_options[:1]
+
+    persona_key = widget_key(
+        "load", "personas", widget_scope, store.model_name, *variants
+    )
+
+    def _remember_personas() -> None:
+        st.session_state[remember_key] = [
+            persona_id
+            for persona_id in st.session_state.get(persona_key, [])
+            if persona_id in persona_options
+        ]
+
     persona_ids = st.multiselect(
         "Personas",
         options=persona_options,
@@ -178,9 +193,9 @@ def _select_artifact_personas(
         format_func=lambda persona_id: persona_display_label(
             persona_id, persona_names.get(persona_id)
         ),
-        key=widget_key("load", "personas", store.model_name, *variants),
+        key=persona_key,
+        on_change=_remember_personas,
     )
-    st.session_state[_LAST_PERSONAS_KEY] = persona_ids
     return persona_ids, persona_names
 
 
@@ -202,64 +217,6 @@ def _render_save_buttons(
                 st.success(f"Saved {len(paths)} PNG file(s) to `artifacts/plots`.")
             except Exception as exc:
                 st.error(f"Could not save PNG: {exc}")
-
-
-def _select_embedding_config(
-    store: ActivationStore,
-) -> _EmbeddingConfig | None:
-    """Render variant / persona / layer selectors and return the selection, or None on early exit."""
-    selected_variant = st.selectbox(
-        "Variant",
-        options=SUPPORTED_VARIANTS,
-        format_func=prompt_variant_label,
-        key=widget_key("load", "variant"),
-    )
-
-    persona_ids, persona_names = _select_artifact_personas(store, [selected_variant])
-    if not persona_ids:
-        return None
-
-    persona_key = "_".join(sorted(persona_ids))
-    layer_options = _list_layers_cached(
-        str(store.root_dir),
-        store.model_name,
-        [selected_variant],
-        persona_ids,
-    )
-    if not layer_options:
-        st.info(
-            "No shared layers are available for the selected personas. Try fewer personas or a different variant."
-        )
-        return None
-
-    layer_key = widget_key(
-        "load", "layers", store.model_name, selected_variant, persona_key
-    )
-    last_layers: list[int] = st.session_state.get(
-        layer_key, st.session_state.get(_LAST_LAYERS_KEY, layer_options[:3])
-    )
-    default_layers = [
-        layer for layer in last_layers if layer in layer_options
-    ] or layer_options[:3]
-    selected_layers = st.multiselect(
-        "Layers",
-        options=layer_options,
-        default=default_layers,
-        key=layer_key,
-    )
-    if not selected_layers:
-        st.info("Select at least one layer.")
-        return None
-
-    st.session_state[_LAST_LAYERS_KEY] = selected_layers
-
-    return _EmbeddingConfig(
-        variant=selected_variant,
-        persona_ids=persona_ids,
-        persona_names=persona_names,
-        selected_layers=selected_layers,
-        persona_key=persona_key,
-    )
 
 
 def _render_cosine_similarity(store: ActivationStore) -> None:
@@ -285,7 +242,12 @@ def _render_cosine_similarity(store: ActivationStore) -> None:
         st.warning("Choose two different variants to compare.")
         return
 
-    persona_ids, _ = _select_artifact_personas(store, [variant_a, variant_b])
+    persona_ids, _ = _select_artifact_personas(
+        store,
+        [variant_a, variant_b],
+        widget_scope="cosine",
+        remember_key=_LAST_COSINE_PERSONAS_KEY,
+    )
     if not persona_ids:
         return
 
@@ -332,18 +294,77 @@ def _render_cosine_similarity(store: ActivationStore) -> None:
         st.success(f"Loaded {n_traces} personas for cosine comparison.")
 
 
-def _render_embedding_analysis(store: ActivationStore, analysis_mode: str) -> None:
-    config = _select_embedding_config(store)
-    if config is None:
-        return
-
+def _render_projection_analysis(store: ActivationStore, analysis_mode: str) -> None:
     projection_config = _PROJECTION_CONFIGS.get(analysis_mode)
     if projection_config is None:
         st.error(f"Unsupported analysis mode: {analysis_mode}")
         return
 
+    mode_label = st.selectbox(
+        "Variant",
+        options=list(_VARIANT_MODES),
+        key=widget_key("load", "variant_mode", analysis_mode),
+    )
+    variants = list(_VARIANT_MODES[mode_label])
+    multi_variant = len(variants) > 1
+
+    persona_ids, persona_names = _select_artifact_personas(
+        store,
+        variants,
+        widget_scope="projection",
+        remember_key=_LAST_PROJECTION_PERSONAS_KEY,
+        default_all=True,
+    )
+    if not persona_ids:
+        return
+
+    persona_key = "_".join(sorted(persona_ids))
+    layer_options = _list_layers_cached(
+        str(store.root_dir),
+        store.model_name,
+        variants,
+        persona_ids,
+    )
+    if not layer_options:
+        st.info(
+            "No shared layers are available for the selected personas. Try fewer personas or a different variant."
+        )
+        return
+
+    layer_key = widget_key(
+        "load",
+        "layers",
+        "projection",
+        store.model_name,
+        analysis_mode,
+        mode_label,
+        persona_key,
+    )
+    last_layers: list[int] = st.session_state.get(_LAST_PROJECTION_LAYERS_KEY, [])
+    default_layers = [layer for layer in last_layers if layer in layer_options]
+    if not default_layers:
+        default_layers = layer_options
+
+    def _remember_layers() -> None:
+        st.session_state[_LAST_PROJECTION_LAYERS_KEY] = [
+            layer
+            for layer in st.session_state.get(layer_key, [])
+            if layer in layer_options
+        ]
+
+    selected_layers = st.multiselect(
+        "Layers",
+        options=layer_options,
+        default=default_layers,
+        key=layer_key,
+        on_change=_remember_layers,
+    )
+    if not selected_layers:
+        st.info("Select at least one layer.")
+        return
+
     embedding_fig_key = widget_key(
-        "load", "embedding_fig_state", store.model_name, analysis_mode
+        "load", "projection_fig_state", store.model_name, analysis_mode
     )
 
     if st.button(f"Generate {analysis_mode} projection", type="primary"):
@@ -357,22 +378,20 @@ def _render_embedding_analysis(store: ActivationStore, analysis_mode: str) -> No
             )
 
         try:
-            plots, errors = _load_embedding_samples(
+            plots, errors = _load_mean_samples(
                 store,
-                config.persona_ids,
-                config.variant,
-                config.selected_layers,
-                projection_config.project_fn,
-                config.persona_names,
+                persona_ids,
+                variants,
+                selected_layers,
+                persona_names,
+                project_fn=projection_config.project_fn,
+                multi_variant=multi_variant,
                 progress_fn=update_progress,
             )
 
             if errors:
                 for err in errors:
-                    if (
-                        "missing layer" in err
-                        or "no selected personas have this layer" in err
-                    ):
+                    if "missing layer" in err:
                         st.warning(f"Skipping unavailable data: `{err}`")
                     else:
                         st.error(f"Failed to load vectors: `{err}`")
@@ -383,25 +402,26 @@ def _render_embedding_analysis(store: ActivationStore, analysis_mode: str) -> No
                 st.info("Try fewer personas, fewer layers, or a different variant.")
                 st.session_state.pop(embedding_fig_key, None)
             else:
-                rendered_figures = [
-                    (
-                        layer_idx,
-                        build_embedding_figure(
-                            coords=coords,
-                            labels=labels,
-                            title=f"{projection_config.title_prefix}, layer {layer_idx}",
-                            x_label=projection_config.x_label,
-                            y_label=projection_config.y_label,
-                            hover_text=hover_text,
-                        ),
+                rendered_figures: list[tuple[int, object]] = []
+                for layer_idx, coords, labels, hover_text in plots:
+                    fig = build_embedding_figure(
+                        coords=coords,
+                        labels=labels,
+                        title=f"{projection_config.title_prefix} (persona means), layer {layer_idx}",
+                        x_label=projection_config.x_label,
+                        y_label=projection_config.y_label,
+                        hover_text=hover_text,
                     )
-                    for layer_idx, coords, labels, hover_text in plots
-                ]
+                    if multi_variant:
+                        fig.update_traces(showlegend=True)
+                    rendered_figures.append((layer_idx, fig))
+
                 total_samples = sum(coords.shape[0] for _, coords, _, _ in plots)
+                variant_key = "+".join(variants)
                 st.session_state[embedding_fig_key] = (
                     rendered_figures,
-                    config.persona_key,
-                    config.variant,
+                    persona_key,
+                    variant_key,
                     total_samples,
                 )
         finally:
@@ -452,4 +472,4 @@ def render_compare_tab(model_name: str) -> None:
         _render_cosine_similarity(store)
         return
 
-    _render_embedding_analysis(store, analysis_mode)
+    _render_projection_analysis(store, analysis_mode)

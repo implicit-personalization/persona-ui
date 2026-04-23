@@ -26,8 +26,8 @@ ANALYSIS_MODES = ["Cosine similarity", "PCA", "UMAP"]
 
 ANALYSIS_HELP_TEXT = {
     "Cosine similarity": "Compare layer-wise alignment between variants.",
-    "PCA": "Project the selected layers into a global 2D view.",
-    "UMAP": "Project the selected layers into a local-neighborhood 2D view.",
+    "PCA": "Project per-persona mean activations into a 2D global view.",
+    "UMAP": "Project per-persona mean activations into a 2D local-neighborhood view.",
 }
 
 NDIF_STATUS_ICONS = {
