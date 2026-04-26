@@ -78,5 +78,5 @@ def cached_model(model_name: str, remote: bool):
     from nnterp import StandardizedTransformer
 
     # HACK: For now do it like this because of the bug.
-    # model = StandardizedTransformer(model_name, remote=True)
+    # return StandardizedTransformer(model_name, remote=remote, check_renaming=False)
     return StandardizedTransformer(model_name)
