@@ -20,7 +20,7 @@ Streamlit interface for persona vector extraction, analysis, and chat.
 A web app built on top of [persona-vectors](../persona-vectors) that provides three tabs:
 
 - **Chat** — interactive conversations with a model using persona-based system prompts (templated or biography)
-- **Compare** — load saved activations and explore layer-wise cosine similarity, PCA, and UMAP projections
+- **Compare** — load saved activations and explore layer-wise cosine similarity, persona-mean PCA, UMAP, and similarity projections
 - **Extract** — run activation extraction from HuggingFace persona datasets or a local JSONL dataset directly from the browser
 
 ## Repository Layout

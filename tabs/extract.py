@@ -2,12 +2,17 @@ import html
 from typing import Literal, cast
 
 import streamlit as st
-from persona_data.prompts import system_prompt_for_variant
+from persona_data.prompts import (
+    BASELINE_PERSONA_ID,
+    BASELINE_PERSONA_NAME,
+    system_prompt_for_variant,
+)
+from persona_data.synth_persona import PersonaData, QAPair
 from persona_vectors.artifacts import SUPPORTED_VARIANTS
 from persona_vectors.extraction import (
     MaskStrategy,
     PreparedInput,
-    prepare_inputs,
+    prepare_inputs_for_strategy,
     run_extraction,
 )
 
@@ -30,6 +35,31 @@ _LAST_MAX_QUESTIONS_KEY = "extract:last_max_questions"
 _LAST_MASK_STRATEGY_KEY = "extract:last_mask_strategy"
 
 _QA_TYPE_OPTIONS = ["all", "explicit", "implicit"]
+
+
+def _baseline_persona() -> PersonaData:
+    return PersonaData(
+        id=BASELINE_PERSONA_ID,
+        persona={"first_name": BASELINE_PERSONA_NAME, "last_name": ""},
+        templated_view=BASELINE_PERSONA_NAME,
+        biography_view=BASELINE_PERSONA_NAME,
+    )
+
+
+def _build_run_plan(
+    selected_variants: list[str],
+    runs: list[tuple[PersonaData, list[QAPair]]],
+) -> list[tuple[PersonaData, list[QAPair], str]]:
+    regular_variants = [v for v in selected_variants if v != "baseline"]
+    run_plan = [
+        (persona, qa_pairs, variant)
+        for persona, qa_pairs in runs
+        for variant in regular_variants
+    ]
+    if "baseline" in selected_variants:
+        _, baseline_qa_pairs = runs[0]
+        run_plan.append((_baseline_persona(), baseline_qa_pairs, "baseline"))
+    return run_plan
 
 
 def _extract_widget_key(
@@ -150,6 +180,10 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
     if not selected_variants:
         st.info("Select at least one prompt variant.")
         return
+    if "baseline" in selected_variants:
+        st.caption(
+            "Baseline uses the persona-less Assistant prompt and is saved once as an Assistant reference. It uses the first selected persona's QA set for extraction."
+        )
 
     try:
         dataset, dataset_status = load_dataset(
@@ -303,32 +337,34 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         with st.spinner("Loading tokenizer..."):
             model = cached_model(model_name=model_name, remote=remote)
         st.markdown(_TOKEN_LEGEND, unsafe_allow_html=True)
-        for persona, qa_pairs in runs:
-            for variant in selected_variants:
-                system_prompt = system_prompt_for_variant(persona, variant)
-                prepared = prepare_inputs(
-                    tokenizer=model.tokenizer,
-                    system_prompt=system_prompt,
-                    qa_pairs=qa_pairs[:max_questions],
-                    mask_strategy=mask_strategy,
+        for persona, qa_pairs, variant in _build_run_plan(selected_variants, runs):
+            system_prompt = system_prompt_for_variant(persona, variant)
+            prepared = prepare_inputs_for_strategy(
+                tokenizer=model.tokenizer,
+                system_prompt=system_prompt,
+                qa_pairs=qa_pairs[:max_questions],
+                mask_strategy=mask_strategy,
+            )
+            display_name = (
+                BASELINE_PERSONA_NAME if variant == "baseline" else persona.name
+            )
+            st.caption(f"{display_name} · {prompt_variant_label(variant)}")
+            shown = prepared[:_MAX_PREVIEW_SAMPLES]
+            for i, p in enumerate(shown):
+                question = (
+                    p.question if len(p.question) <= 60 else p.question[:57] + "..."
                 )
-                st.caption(f"{persona.name} · {prompt_variant_label(variant)}")
-                shown = prepared[:_MAX_PREVIEW_SAMPLES]
-                for i, p in enumerate(shown):
-                    question = (
-                        p.question if len(p.question) <= 60 else p.question[:57] + "..."
+                seq_len = int(p.input_ids.shape[0])
+                masked = int(p.token_mask.sum())
+                label = f"sample {i} — {question}  (len={seq_len}, masked={masked})"
+                with st.expander(label):
+                    st.markdown(
+                        _render_sample_tokens_html(p, model.tokenizer),
+                        unsafe_allow_html=True,
                     )
-                    seq_len = int(p.input_ids.shape[0])
-                    masked = int(p.token_mask.sum())
-                    label = f"sample {i} — {question}  (len={seq_len}, masked={masked})"
-                    with st.expander(label):
-                        st.markdown(
-                            _render_sample_tokens_html(p, model.tokenizer),
-                            unsafe_allow_html=True,
-                        )
-                if len(prepared) > _MAX_PREVIEW_SAMPLES:
-                    remaining = len(prepared) - _MAX_PREVIEW_SAMPLES
-                    st.caption(f"… and {remaining} more sample(s) not shown.")
+            if len(prepared) > _MAX_PREVIEW_SAMPLES:
+                remaining = len(prepared) - _MAX_PREVIEW_SAMPLES
+                st.caption(f"… and {remaining} more sample(s) not shown.")
         return
 
     if not run_clicked:
@@ -347,28 +383,31 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         model = cached_model(model_name=model_name, remote=remote)
 
     try:
-        total_steps = len(runs) * len(selected_variants)
+        run_plan = _build_run_plan(selected_variants, runs)
+        total_steps = len(run_plan)
         step = 0
         results = []
 
-        for persona, qa_pairs in runs:
-            for variant in selected_variants:
-                progress.progress(
-                    step / total_steps if total_steps else 1.0,
-                    text=f"{persona.name} · {prompt_variant_label(variant)} ({step + 1}/{total_steps})",
-                )
-                variant_results = run_extraction(
-                    model=model,
-                    model_name=model_name,
-                    persona=persona,
-                    qa_pairs=qa_pairs[:max_questions],
-                    variants=(variant,),
-                    mask_strategy=mask_strategy,
-                    remote=remote,
-                    on_status=_on_ndif_status if remote else None,
-                )
-                results.extend(variant_results)
-                step += 1
+        for persona, qa_pairs, variant in run_plan:
+            display_name = (
+                BASELINE_PERSONA_NAME if variant == "baseline" else persona.name
+            )
+            progress.progress(
+                step / total_steps if total_steps else 1.0,
+                text=f"{display_name} · {prompt_variant_label(variant)} ({step + 1}/{total_steps})",
+            )
+            variant_results = run_extraction(
+                model=model,
+                model_name=model_name,
+                persona=persona,
+                qa_pairs=qa_pairs[:max_questions],
+                variants=(variant,),
+                mask_strategy=mask_strategy,
+                remote=remote,
+                on_status=_on_ndif_status if remote else None,
+            )
+            results.extend(variant_results)
+            step += 1
 
         progress.progress(1.0, text="Extraction complete")
     except Exception as exc:

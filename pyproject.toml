@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "persona-vectors>=0.3.2",
-    "persona-data>=0.2.2",
+    "persona-data>=0.2.3",
     "streamlit>=1.44.0",
     "plotly>=6.6.0",
     "python-dotenv>=1.2.2",
@@ -14,8 +14,8 @@ dependencies = [
 ]
 
 # Local development:
-# [tool.uv.sources]
-# persona-vectors = { path = "../persona-vectors", editable = true }
+[tool.uv.sources]
+persona-vectors = { path = "../persona-vectors", editable = true }
 # persona-data = { path = "../persona-data", editable = true }
 
 # [build-system]

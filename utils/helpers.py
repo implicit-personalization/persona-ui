@@ -22,10 +22,11 @@ DATASET_SOURCES = [
     "HuggingFace: nemotron-usa",
     "Local JSONL upload",
 ]
-ANALYSIS_MODES = ["Cosine similarity", "PCA", "UMAP"]
+ANALYSIS_MODES = ["Cosine similarity", "Similarity matrix", "PCA", "UMAP"]
 
 ANALYSIS_HELP_TEXT = {
     "Cosine similarity": "Compare layer-wise alignment between variants.",
+    "Similarity matrix": "Compare centered pairwise similarity between persona means by layer, with pair trajectories across layers.",
     "PCA": "Project per-persona mean activations into a 2D global view.",
     "UMAP": "Project per-persona mean activations into a 2D local-neighborhood view.",
 }

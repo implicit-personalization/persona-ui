@@ -8,6 +8,8 @@ from utils.helpers import DATASET_SOURCES
 load_dotenv()
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "google/gemma-2-2b-it")
 REMOTE_DEFAULT_MODEL = os.environ.get("REMOTE_DEFAULT_MODEL", "google/gemma-2-9b-it")
+_LAST_LOCAL_MODEL_KEY = "sidebar:last_local_model"
+_LAST_REMOTE_MODEL_KEY = "sidebar:last_remote_model"
 
 
 _TABS = ["Chat", "Compare", "Extract"]
@@ -51,17 +53,14 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
                 help="Enter any NDIF-loadable model id, even if it is not currently running.",
             )
             if remote_models:
-                default_model = (
-                    REMOTE_DEFAULT_MODEL
-                    if REMOTE_DEFAULT_MODEL in remote_models
-                    else remote_models[0]
-                )
                 if custom_remote_model:
                     model_name = st.text_input(
                         "Model",
                         value=st.session_state.get(
                             "sidebar__remote_model_custom_value",
-                            REMOTE_DEFAULT_MODEL,
+                            st.session_state.get(
+                                _LAST_REMOTE_MODEL_KEY, REMOTE_DEFAULT_MODEL
+                            ),
                         ),
                         key="sidebar__remote_model_custom_value",
                         help="NDIF model id. Example: openai/gpt-oss-20b",
@@ -70,6 +69,18 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
                         f"{len(remote_models)} running NDIF model(s) detected. Custom model ids can cold-load if your NDIF account allows it."
                     )
                 else:
+                    default_model = st.session_state.get(
+                        "sidebar__remote_model",
+                        st.session_state.get(_LAST_REMOTE_MODEL_KEY),
+                    )
+                    if default_model not in remote_models:
+                        default_model = (
+                            REMOTE_DEFAULT_MODEL
+                            if REMOTE_DEFAULT_MODEL in remote_models
+                            else remote_models[0]
+                        )
+                    if st.session_state.get("sidebar__remote_model") not in remote_models:
+                        st.session_state["sidebar__remote_model"] = default_model
                     selected_remote_model = st.selectbox(
                         "Model",
                         options=remote_models,
@@ -84,18 +95,20 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
                     "Model",
                     value=st.session_state.get(
                         "sidebar__remote_model_custom_value",
-                        REMOTE_DEFAULT_MODEL,
+                        st.session_state.get(_LAST_REMOTE_MODEL_KEY, REMOTE_DEFAULT_MODEL),
                     ),
                     key="sidebar__remote_model_custom_value",
                     help="NDIF model id. Use this to cold-load a remote model.",
                 )
+            st.session_state[_LAST_REMOTE_MODEL_KEY] = model_name
         else:
             model_name = st.text_input(
                 "Model",
-                value=DEFAULT_MODEL,
+                value=st.session_state.get(_LAST_LOCAL_MODEL_KEY, DEFAULT_MODEL),
                 key="sidebar__local_model",
                 help="Local model id or path.",
             )
+            st.session_state[_LAST_LOCAL_MODEL_KEY] = model_name
 
         st.caption("Data")
         dataset_source = st.selectbox(

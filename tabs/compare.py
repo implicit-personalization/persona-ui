@@ -1,15 +1,20 @@
-from collections.abc import Callable
-from dataclasses import dataclass
-
 import streamlit as st
 import torch
 from persona_data.environment import get_artifacts_dir
-from persona_vectors.analysis import build_embedding_figure, project_pca, project_umap
+from persona_data.prompts import BASELINE_PERSONA_ID
+from persona_vectors.analysis import LayeredSamples, load_persona_mean_samples
 from persona_vectors.artifacts import SUPPORTED_VARIANTS, ActivationStore
 from persona_vectors.artifacts import list_layers as list_available_layers
 from persona_vectors.artifacts import list_personas as list_available_personas
 from persona_vectors.artifacts import load_mean_activations, load_persona_names
-from persona_vectors.plots import plot_layer_similarity, save_plot_html, save_plot_png
+from persona_vectors.extraction import MaskStrategy
+from persona_vectors.plots import (
+    build_layered_figure,
+    build_pair_similarity_figure,
+    plot_layer_similarity,
+    save_plot_html,
+    save_plot_png,
+)
 
 from utils.helpers import (
     ANALYSIS_HELP_TEXT,
@@ -25,141 +30,37 @@ def _filename(*parts: str) -> str:
     return "__".join(slugify(part) for part in parts if part)
 
 
-@dataclass(frozen=True)
-class ProjectionConfig:
-    title_prefix: str
-    x_label: str
-    y_label: str
-    project_fn: Callable[[torch.Tensor], torch.Tensor]
-
-
-_PROJECTION_CONFIGS: dict[str, ProjectionConfig] = {
-    "PCA": ProjectionConfig("PCA", "PC1", "PC2", project_pca),
-    "UMAP": ProjectionConfig("UMAP", "UMAP 1", "UMAP 2", project_umap),
-}
-
-_VARIANT_MODES: dict[str, tuple[str, ...]] = {
-    "Template": ("templated",),
-    "Biography": ("biography",),
-    "Template + Biography": ("templated", "biography"),
-}
-
 _list_layers_cached = st.cache_data(show_spinner=False)(list_available_layers)
 
 # Keep compare-tab selection state separate so projection defaults do not
 # overwrite cosine similarity defaults.
 _LAST_COSINE_PERSONAS_KEY = "compare:last_personas:cosine"
 _LAST_PROJECTION_PERSONAS_KEY = "compare:last_personas:projection"
-_LAST_PROJECTION_LAYERS_KEY = "compare:last_layers:projection"
-
-
-def _load_mean_samples(
-    store: ActivationStore,
-    persona_ids: list[str],
-    variants: list[str],
-    selected_layers: list[int],
-    persona_names: dict[str, str],
-    project_fn: Callable[[torch.Tensor], torch.Tensor],
-    multi_variant: bool,
-    progress_fn: Callable[[int, int, int], None] | None = None,
-) -> tuple[list[tuple[int, torch.Tensor, list[str], list[str]]], list[str]]:
-    """Compute per-persona mean activations and project to 2D per layer."""
-
-    plots: list[tuple[int, torch.Tensor, list[str], list[str]]] = []
-    errors: list[str] = []
-    loaded: dict[tuple[str, str], torch.Tensor] = {}
-
-    for variant in variants:
-        for persona_id in persona_ids:
-            try:
-                vectors, _ = store.load(variant, persona_id)
-            except (FileNotFoundError, KeyError, OSError, ValueError) as exc:
-                errors.append(f"{persona_id} / {variant}: {exc}")
-                continue
-            loaded[(variant, persona_id)] = vectors
-
-    total_layers = len(selected_layers)
-    for idx, layer_idx in enumerate(selected_layers, start=1):
-        samples: list[torch.Tensor] = []
-        labels: list[str] = []
-        hover_text: list[str] = []
-
-        for variant in variants:
-            variant_lbl = prompt_variant_label(variant)
-            for persona_id in persona_ids:
-                vectors = loaded.get((variant, persona_id))
-                if vectors is None:
-                    continue
-                if layer_idx >= vectors.shape[1]:
-                    errors.append(
-                        f"{persona_id} / {variant}: missing layer {layer_idx}"
-                    )
-                    continue
-                mean_vec = vectors[:, layer_idx, :].float().mean(dim=0)
-                samples.append(mean_vec)
-                display_name = persona_names.get(persona_id) or persona_id
-                labels.append(variant_lbl if multi_variant else "Personas")
-                hover_text.append(f"<b>{display_name}</b><br>{variant_lbl}")
-
-        if len(samples) < 2:
-            errors.append(
-                f"Layer {layer_idx}: need at least 2 persona means to project"
-            )
-        else:
-            try:
-                stacked = torch.stack(samples, dim=0)
-                coords = project_fn(stacked)
-                plots.append((layer_idx, coords, labels, hover_text))
-            except Exception as exc:
-                errors.append(f"Layer {layer_idx}: {exc}")
-
-        if progress_fn is not None:
-            progress_fn(idx, total_layers, len(plots))
-
-    return plots, errors
-
-
-def _render_embedding_results(
-    model_name: str,
-    analysis_mode: str,
-    rendered_figures: list[tuple[int, object]],
-    saved_variant: str,
-    saved_persona_key: str,
-    total_samples: int,
-) -> None:
-    cols = st.columns(2)
-    for idx, (_, fig) in enumerate(rendered_figures):
-        with cols[idx % 2]:
-            st.plotly_chart(fig, width="stretch")
-
-    st.success(f"Loaded {total_samples} samples across {len(rendered_figures)} layers.")
-    filenames = [
-        _filename(
-            "compare",
-            analysis_mode,
-            model_name,
-            saved_variant,
-            saved_persona_key,
-            str(layer_idx),
-        )
-        for layer_idx, _ in rendered_figures
-    ]
-    _render_save_buttons([fig for _, fig in rendered_figures], filenames, analysis_mode)
+_LAST_MASK_STRATEGY_KEY = "compare:last_mask_strategy"
+_COMPARABLE_VARIANTS = tuple(v for v in SUPPORTED_VARIANTS if v != "baseline")
 
 
 def _select_artifact_personas(
     store: ActivationStore,
     variants: list[str],
+    mask_strategy: MaskStrategy,
     *,
     widget_scope: str,
     remember_key: str,
     default_all: bool = False,
 ) -> tuple[list[str], dict[str, str]]:
     persona_options = list_available_personas(
-        store.root_dir, store.model_name, variants
+        store.root_dir,
+        store.model_name,
+        variants,
+        mask_strategy=mask_strategy,
     )
     persona_names = load_persona_names(
-        store.root_dir, store.model_name, variants, persona_options
+        store.root_dir,
+        store.model_name,
+        variants,
+        persona_options,
+        mask_strategy=mask_strategy,
     )
     if not persona_options:
         if len(variants) > 1:
@@ -176,7 +77,12 @@ def _select_artifact_personas(
         default_personas = persona_options if default_all else persona_options[:1]
 
     persona_key = widget_key(
-        "load", "personas", widget_scope, store.model_name, *variants
+        "load",
+        "personas",
+        widget_scope,
+        store.model_name,
+        mask_strategy.value,
+        *variants,
     )
 
     def _remember_personas() -> None:
@@ -219,12 +125,45 @@ def _render_save_buttons(
                 st.error(f"Could not save PNG: {exc}")
 
 
-def _render_cosine_similarity(store: ActivationStore) -> None:
+def _render_mask_strategy_select(scope: str) -> MaskStrategy:
+    last_strategy = st.session_state.get(
+        _LAST_MASK_STRATEGY_KEY,
+        MaskStrategy.ANSWER_MEAN.value,
+    )
+    strategies = list(MaskStrategy)
+    default_index = next(
+        (
+            idx
+            for idx, strategy in enumerate(strategies)
+            if strategy.value == last_strategy
+        ),
+        0,
+    )
+    selected = st.selectbox(
+        "Mask strategy",
+        options=strategies,
+        index=default_index,
+        format_func=lambda strategy: strategy.value.replace("_", " ").title(),
+        key=widget_key("load", "mask_strategy", scope),
+        help="Which extracted activation artifact set to load.",
+    )
+    st.session_state[_LAST_MASK_STRATEGY_KEY] = selected.value
+    return selected
+
+
+def _render_cosine_similarity(
+    store: ActivationStore,
+    mask_strategy: MaskStrategy,
+) -> None:
+    if len(_COMPARABLE_VARIANTS) < 2:
+        st.info("Need at least two non-baseline variants for cosine comparison.")
+        return
+
     col1, col2 = st.columns(2)
     with col1:
         variant_a = st.selectbox(
             "Variant A",
-            options=SUPPORTED_VARIANTS,
+            options=_COMPARABLE_VARIANTS,
             index=0,
             format_func=prompt_variant_label,
             key=widget_key("load", "variant_a"),
@@ -232,8 +171,8 @@ def _render_cosine_similarity(store: ActivationStore) -> None:
     with col2:
         variant_b = st.selectbox(
             "Variant B",
-            options=SUPPORTED_VARIANTS,
-            index=min(1, len(SUPPORTED_VARIANTS) - 1),
+            options=_COMPARABLE_VARIANTS,
+            index=min(1, len(_COMPARABLE_VARIANTS) - 1),
             format_func=prompt_variant_label,
             key=widget_key("load", "variant_b"),
         )
@@ -245,6 +184,7 @@ def _render_cosine_similarity(store: ActivationStore) -> None:
     persona_ids, _ = _select_artifact_personas(
         store,
         [variant_a, variant_b],
+        mask_strategy,
         widget_scope="cosine",
         remember_key=_LAST_COSINE_PERSONAS_KEY,
     )
@@ -252,13 +192,30 @@ def _render_cosine_similarity(store: ActivationStore) -> None:
         return
 
     cosine_fig_key = widget_key(
-        "load", "cosine_fig_state", store.model_name, variant_a, variant_b
+        "load",
+        "cosine_fig_state",
+        store.model_name,
+        mask_strategy.value,
+        variant_a,
+        variant_b,
     )
-    filename = _filename("compare", "cosine", store.model_name, variant_a, variant_b)
+    filename = _filename(
+        "compare",
+        "cosine",
+        store.model_name,
+        mask_strategy.value,
+        variant_a,
+        variant_b,
+    )
 
     if st.button("Compare vectors", type="primary"):
         traces, loaded_names, errors = load_mean_activations(
-            store.root_dir, store.model_name, persona_ids, variant_a, variant_b
+            store.root_dir,
+            store.model_name,
+            persona_ids,
+            variant_a,
+            variant_b,
+            mask_strategy=mask_strategy,
         )
 
         if errors:
@@ -294,151 +251,277 @@ def _render_cosine_similarity(store: ActivationStore) -> None:
         st.success(f"Loaded {n_traces} personas for cosine comparison.")
 
 
-def _render_projection_analysis(store: ActivationStore, analysis_mode: str) -> None:
-    projection_config = _PROJECTION_CONFIGS.get(analysis_mode)
-    if projection_config is None:
-        st.error(f"Unsupported analysis mode: {analysis_mode}")
-        return
-
-    mode_label = st.selectbox(
+def _select_single_variant_samples(
+    store: ActivationStore,
+    mask_strategy: MaskStrategy,
+    scope: str,
+) -> tuple[str, list[str], str, list[int]] | None:
+    variant = st.selectbox(
         "Variant",
-        options=list(_VARIANT_MODES),
-        key=widget_key("load", "variant_mode", analysis_mode),
+        options=_COMPARABLE_VARIANTS,
+        index=_COMPARABLE_VARIANTS.index("biography")
+        if "biography" in _COMPARABLE_VARIANTS
+        else 0,
+        format_func=prompt_variant_label,
+        key=widget_key("load", "variant", scope),
     )
-    variants = list(_VARIANT_MODES[mode_label])
-    multi_variant = len(variants) > 1
-
-    persona_ids, persona_names = _select_artifact_personas(
+    persona_ids, _ = _select_artifact_personas(
         store,
-        variants,
-        widget_scope="projection",
+        [variant],
+        mask_strategy,
+        widget_scope=scope,
         remember_key=_LAST_PROJECTION_PERSONAS_KEY,
         default_all=True,
     )
     if not persona_ids:
-        return
+        return None
 
     persona_key = "_".join(sorted(persona_ids))
     layer_options = _list_layers_cached(
         str(store.root_dir),
         store.model_name,
-        variants,
+        [variant],
         persona_ids,
+        mask_strategy=mask_strategy,
     )
     if not layer_options:
-        st.info(
-            "No shared layers are available for the selected personas. Try fewer personas or a different variant."
-        )
-        return
-
-    layer_key = widget_key(
-        "load",
-        "layers",
-        "projection",
-        store.model_name,
-        analysis_mode,
-        mode_label,
-        persona_key,
-    )
-    last_layers: list[int] = st.session_state.get(_LAST_PROJECTION_LAYERS_KEY, [])
-    default_layers = [layer for layer in last_layers if layer in layer_options]
-    if not default_layers:
-        default_layers = layer_options
-
-    def _remember_layers() -> None:
-        st.session_state[_LAST_PROJECTION_LAYERS_KEY] = [
-            layer
-            for layer in st.session_state.get(layer_key, [])
-            if layer in layer_options
-        ]
+        st.info("No shared layers are available for the selected personas.")
+        return None
 
     selected_layers = st.multiselect(
         "Layers",
         options=layer_options,
-        default=default_layers,
-        key=layer_key,
-        on_change=_remember_layers,
+        default=layer_options,
+        key=widget_key(
+            "load",
+            "layers",
+            scope,
+            store.model_name,
+            mask_strategy.value,
+            variant,
+            persona_key,
+        ),
     )
     if not selected_layers:
         st.info("Select at least one layer.")
-        return
+        return None
 
-    embedding_fig_key = widget_key(
-        "load", "projection_fig_state", store.model_name, analysis_mode
+    return variant, persona_ids, persona_key, selected_layers
+
+
+def _baseline_available(
+    store: ActivationStore,
+    mask_strategy: MaskStrategy,
+) -> bool:
+    return BASELINE_PERSONA_ID in list_available_personas(
+        store.root_dir,
+        store.model_name,
+        ["baseline"],
+        mask_strategy=mask_strategy,
+        warn_missing=False,
+    )
+
+
+def _render_baseline_reference_toggle(
+    store: ActivationStore,
+    mask_strategy: MaskStrategy,
+    scope: str,
+) -> bool:
+    available = _baseline_available(store, mask_strategy)
+    return st.checkbox(
+        "Include Assistant baseline reference",
+        value=available,
+        disabled=not available,
+        key=widget_key("load", "include_baseline", scope, mask_strategy.value),
+        help=(
+            "Adds the single saved baseline artifact as one reference sample."
+            if available
+            else "Run extraction for the baseline variant first."
+        ),
+    )
+
+
+def _append_baseline_reference(
+    store: ActivationStore,
+    mask_strategy: MaskStrategy,
+    samples: LayeredSamples,
+) -> LayeredSamples:
+    baseline_samples = load_persona_mean_samples(
+        store.root_dir,
+        store.model_name,
+        "baseline",
+        mask_strategy=mask_strategy,
+        persona_ids=[BASELINE_PERSONA_ID],
+    )
+    return LayeredSamples(
+        vectors=torch.cat([samples.vectors, baseline_samples.vectors], dim=0),
+        labels=[*samples.labels, *baseline_samples.labels],
+        hover_text=[*samples.hover_text, *baseline_samples.hover_text],
+    )
+
+
+def _render_similarity_matrix(
+    store: ActivationStore,
+    mask_strategy: MaskStrategy,
+) -> None:
+    selected = _select_single_variant_samples(
+        store,
+        mask_strategy,
+        "similarity_matrix",
+    )
+    if selected is None:
+        return
+    variant, persona_ids, persona_key, selected_layers = selected
+    include_baseline = _render_baseline_reference_toggle(
+        store,
+        mask_strategy,
+        "similarity_matrix",
+    )
+
+    fig_key = widget_key(
+        "load",
+        "similarity_matrix_fig_state",
+        store.model_name,
+        mask_strategy.value,
+        variant,
+        "persona_mean",
+        persona_key,
+        "baseline" if include_baseline else "no_baseline",
+    )
+    filename = _filename(
+        "compare",
+        "similarity_matrix",
+        store.model_name,
+        mask_strategy.value,
+        variant,
+        "persona_mean",
+        persona_key,
+        "baseline" if include_baseline else "",
+    )
+
+    if st.button("Generate similarity matrix", type="primary"):
+        try:
+            samples = load_persona_mean_samples(
+                store.root_dir,
+                store.model_name,
+                variant,
+                mask_strategy=mask_strategy,
+                persona_ids=persona_ids,
+            )
+            if include_baseline:
+                samples = _append_baseline_reference(store, mask_strategy, samples)
+            matrix_fig = build_layered_figure(
+                samples,
+                "similarity",
+                layers=selected_layers,
+                title=(
+                    "Centered similarity - "
+                    f"{prompt_variant_label(variant)} - personas averaged over questions"
+                ),
+            )
+            trajectory_fig = build_pair_similarity_figure(
+                samples,
+                layers=selected_layers,
+                title=(
+                    "Pair similarity trajectories - "
+                    f"{prompt_variant_label(variant)} - personas averaged over questions"
+                ),
+            )
+            st.session_state[fig_key] = (
+                matrix_fig,
+                trajectory_fig,
+                samples.vectors.shape[0],
+            )
+        except Exception as exc:
+            st.error(f"Could not build similarity matrix: {exc}")
+            st.session_state.pop(fig_key, None)
+
+    if fig_key in st.session_state:
+        matrix_fig, trajectory_fig, n_samples = st.session_state[fig_key]
+        st.plotly_chart(matrix_fig, width="stretch")
+        st.subheader("Pair trajectories")
+        st.plotly_chart(trajectory_fig, width="stretch")
+        _render_save_buttons(
+            [matrix_fig, trajectory_fig],
+            [filename, f"{filename}__pair_trajectories"],
+            "similarity_matrix",
+        )
+        st.success(f"Loaded {n_samples} samples.")
+
+
+def _render_embedding_analysis(
+    store: ActivationStore,
+    analysis_mode: str,
+    mask_strategy: MaskStrategy,
+) -> None:
+    selected = _select_single_variant_samples(
+        store,
+        mask_strategy,
+        analysis_mode.lower(),
+    )
+    if selected is None:
+        return
+    variant, persona_ids, persona_key, selected_layers = selected
+
+    figure_kind = analysis_mode.lower()
+    include_baseline = _render_baseline_reference_toggle(
+        store,
+        mask_strategy,
+        analysis_mode.lower(),
+    )
+
+    fig_key = widget_key(
+        "load",
+        "embedding_fig_state",
+        store.model_name,
+        mask_strategy.value,
+        figure_kind,
+        variant,
+        "persona_mean",
+        persona_key,
+        "baseline" if include_baseline else "no_baseline",
+    )
+    filename = _filename(
+        "compare",
+        figure_kind,
+        store.model_name,
+        mask_strategy.value,
+        variant,
+        "persona_mean",
+        persona_key,
+        "baseline" if include_baseline else "",
     )
 
     if st.button(f"Generate {analysis_mode} projection", type="primary"):
-        progress = st.progress(0, text="Preparing projections...")
-
-        def update_progress(current: int, total: int, loaded: int) -> None:
-            fraction = current / total if total else 1.0
-            progress.progress(
-                fraction,
-                text=f"Processing layer {current}/{total} ({loaded} plot(s) ready)",
-            )
-
         try:
-            plots, errors = _load_mean_samples(
-                store,
-                persona_ids,
-                variants,
-                selected_layers,
-                persona_names,
-                project_fn=projection_config.project_fn,
-                multi_variant=multi_variant,
-                progress_fn=update_progress,
+            samples = load_persona_mean_samples(
+                store.root_dir,
+                store.model_name,
+                variant,
+                mask_strategy=mask_strategy,
+                persona_ids=persona_ids,
             )
+            if include_baseline:
+                samples = _append_baseline_reference(store, mask_strategy, samples)
+            fig = build_layered_figure(
+                samples,
+                figure_kind,
+                layers=selected_layers,
+                title=(
+                    f"{analysis_mode} - "
+                    f"{prompt_variant_label(variant)} - Persona means"
+                ),
+            )
+            st.session_state[fig_key] = (fig, samples.vectors.shape[0])
+        except Exception as exc:
+            st.error(f"Could not build {analysis_mode}: {exc}")
+            st.session_state.pop(fig_key, None)
 
-            if errors:
-                for err in errors:
-                    if "missing layer" in err:
-                        st.warning(f"Skipping unavailable data: `{err}`")
-                    else:
-                        st.error(f"Failed to load vectors: `{err}`")
-            if not plots:
-                st.warning(
-                    "No projections could be built for the current persona/layer selection."
-                )
-                st.info("Try fewer personas, fewer layers, or a different variant.")
-                st.session_state.pop(embedding_fig_key, None)
-            else:
-                rendered_figures: list[tuple[int, object]] = []
-                for layer_idx, coords, labels, hover_text in plots:
-                    fig = build_embedding_figure(
-                        coords=coords,
-                        labels=labels,
-                        title=f"{projection_config.title_prefix} (persona means), layer {layer_idx}",
-                        x_label=projection_config.x_label,
-                        y_label=projection_config.y_label,
-                        hover_text=hover_text,
-                    )
-                    if multi_variant:
-                        fig.update_traces(showlegend=True)
-                    rendered_figures.append((layer_idx, fig))
-
-                total_samples = sum(coords.shape[0] for _, coords, _, _ in plots)
-                variant_key = "+".join(variants)
-                st.session_state[embedding_fig_key] = (
-                    rendered_figures,
-                    persona_key,
-                    variant_key,
-                    total_samples,
-                )
-        finally:
-            progress.empty()
-
-    if embedding_fig_key in st.session_state:
-        rendered_figures, saved_persona_key, saved_variant, total_samples = (
-            st.session_state[embedding_fig_key]
-        )
-        _render_embedding_results(
-            store.model_name,
-            analysis_mode,
-            rendered_figures,
-            saved_variant,
-            saved_persona_key,
-            total_samples,
-        )
+    if fig_key in st.session_state:
+        fig, n_samples = st.session_state[fig_key]
+        st.plotly_chart(fig, width="stretch")
+        _render_save_buttons([fig], [filename], figure_kind)
+        st.success(f"Loaded {n_samples} samples.")
 
 
 def render_compare_tab(model_name: str) -> None:
@@ -467,9 +550,13 @@ def render_compare_tab(model_name: str) -> None:
     if analysis_mode is None:
         analysis_mode = ANALYSIS_MODES[0]
     st.caption(ANALYSIS_HELP_TEXT[analysis_mode])
+    mask_strategy = _render_mask_strategy_select(analysis_mode)
 
     if analysis_mode == "Cosine similarity":
-        _render_cosine_similarity(store)
+        _render_cosine_similarity(store, mask_strategy)
+        return
+    if analysis_mode == "Similarity matrix":
+        _render_similarity_matrix(store, mask_strategy)
         return
 
-    _render_projection_analysis(store, analysis_mode)
+    _render_embedding_analysis(store, analysis_mode, mask_strategy)
