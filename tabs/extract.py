@@ -5,10 +5,10 @@ import streamlit as st
 from persona_data.prompts import (
     BASELINE_PERSONA_ID,
     BASELINE_PERSONA_NAME,
-    system_prompt_for_variant,
+    format_roleplay_prompt,
 )
 from persona_data.synth_persona import PersonaData, QAPair
-from persona_vectors.artifacts import SUPPORTED_VARIANTS
+from persona_vectors.artifacts import PERSONA_VARIANTS
 from persona_vectors.extraction import (
     MaskStrategy,
     PreparedInput,
@@ -28,6 +28,7 @@ from utils.runtime import cached_model
 # Cross-model / remote-switch persistence — same pattern as compare.py.
 # Written on every render so selections survive model or NDIF toggles.
 _LAST_VARIANTS_KEY = "extract:last_variants"
+_LAST_BASELINE_KEY = "extract:last_include_baseline"
 _LAST_PERSONA_IDS_KEY = "extract:last_persona_ids"
 _LAST_QA_TYPE_KEY = "extract:last_qa_type"
 _LAST_DIFFICULTY_KEY = "extract:last_difficulty"
@@ -37,29 +38,24 @@ _LAST_MASK_STRATEGY_KEY = "extract:last_mask_strategy"
 _QA_TYPE_OPTIONS = ["all", "explicit", "implicit"]
 
 
-def _baseline_persona() -> PersonaData:
-    return PersonaData(
-        id=BASELINE_PERSONA_ID,
-        persona={"first_name": BASELINE_PERSONA_NAME, "last_name": ""},
-        templated_view=BASELINE_PERSONA_NAME,
-        biography_view=BASELINE_PERSONA_NAME,
-    )
-
-
 def _build_run_plan(
     selected_variants: list[str],
     runs: list[tuple[PersonaData, list[QAPair]]],
-) -> list[tuple[PersonaData, list[QAPair], str]]:
-    regular_variants = [v for v in selected_variants if v != "baseline"]
-    run_plan = [
-        (persona, qa_pairs, variant)
-        for persona, qa_pairs in runs
-        for variant in regular_variants
-    ]
-    if "baseline" in selected_variants:
-        _, baseline_qa_pairs = runs[0]
-        run_plan.append((_baseline_persona(), baseline_qa_pairs, "baseline"))
-    return run_plan
+) -> list[tuple[PersonaData | None, list[QAPair], str]]:
+    """Expand selected variants × personas into one (persona, qa, variant) per call.
+
+    The baseline variant is run once across the first persona's QA pairs and
+    has no associated persona.
+    """
+    plan: list[tuple[PersonaData | None, list[QAPair], str]] = []
+    for variant in selected_variants:
+        if variant == BASELINE_PERSONA_ID:
+            _, qa_pairs = runs[0]
+            plan.append((None, qa_pairs, variant))
+        else:
+            for persona, qa_pairs in runs:
+                plan.append((persona, qa_pairs, variant))
+    return plan
 
 
 def _extract_widget_key(
@@ -165,25 +161,41 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
     if dataset_source == "Local JSONL upload":
         _render_local_dataset_uploads()
 
-    last_variants = st.session_state.get(_LAST_VARIANTS_KEY, list(SUPPORTED_VARIANTS))
-    default_variants = [v for v in last_variants if v in SUPPORTED_VARIANTS] or list(
-        SUPPORTED_VARIANTS
+    last_variants = st.session_state.get(
+        _LAST_VARIANTS_KEY, [*PERSONA_VARIANTS, BASELINE_PERSONA_ID]
     )
-    selected_variants = st.multiselect(
-        "Prompt variants",
-        options=SUPPORTED_VARIANTS,
-        default=default_variants,
+    default_persona_variants = [
+        v for v in last_variants if v in PERSONA_VARIANTS
+    ] or list(PERSONA_VARIANTS)
+    selected_persona_variants = st.multiselect(
+        "Persona variants",
+        options=PERSONA_VARIANTS,
+        default=default_persona_variants,
         format_func=prompt_variant_label,
-        key=_extract_widget_key(model_name, remote, dataset_source, "prompt_variants"),
+        key=_extract_widget_key(model_name, remote, dataset_source, "persona_variants"),
+        help="Extract these variants for each selected persona.",
     )
+    include_baseline_default = st.session_state.get(
+        _LAST_BASELINE_KEY, BASELINE_PERSONA_ID in last_variants
+    )
+    include_baseline = st.checkbox(
+        "Extract Assistant baseline",
+        value=include_baseline_default,
+        key=_extract_widget_key(model_name, remote, dataset_source, "baseline"),
+        help=(
+            "Extracts the persona-less Assistant prompt once using the first "
+            "selected persona's QA set."
+        ),
+    )
+    selected_variants = [
+        *selected_persona_variants,
+        *([BASELINE_PERSONA_ID] if include_baseline else []),
+    ]
     st.session_state[_LAST_VARIANTS_KEY] = selected_variants
+    st.session_state[_LAST_BASELINE_KEY] = include_baseline
     if not selected_variants:
-        st.info("Select at least one prompt variant.")
+        st.info("Select at least one persona variant or enable the baseline.")
         return
-    if "baseline" in selected_variants:
-        st.caption(
-            "Baseline uses the persona-less Assistant prompt and is saved once as an Assistant reference. It uses the first selected persona's QA set for extraction."
-        )
 
     try:
         dataset, dataset_status = load_dataset(
@@ -333,24 +345,30 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
     with preview_col:
         preview_clicked = st.button("Preview tokens", use_container_width=True)
 
+    run_plan = _build_run_plan(selected_variants, runs)
+
+    def _row_label(persona: PersonaData | None, variant: str) -> str:
+        name = persona.name if persona is not None else BASELINE_PERSONA_NAME
+        return f"{name} · {prompt_variant_label(variant)}"
+
     if preview_clicked:
         with st.spinner("Loading tokenizer..."):
             model = cached_model(model_name=model_name, remote=remote)
         st.markdown(_TOKEN_LEGEND, unsafe_allow_html=True)
-        for persona, qa_pairs, variant in _build_run_plan(selected_variants, runs):
-            system_prompt = system_prompt_for_variant(persona, variant)
+        for persona, qa_pairs, variant in run_plan:
+            system_prompt = (
+                format_roleplay_prompt()
+                if persona is None
+                else format_roleplay_prompt(getattr(persona, f"{variant}_view"))
+            )
             prepared = prepare_inputs_for_strategy(
                 tokenizer=model.tokenizer,
                 system_prompt=system_prompt,
                 qa_pairs=qa_pairs[:max_questions],
                 mask_strategy=mask_strategy,
             )
-            display_name = (
-                BASELINE_PERSONA_NAME if variant == "baseline" else persona.name
-            )
-            st.caption(f"{display_name} · {prompt_variant_label(variant)}")
-            shown = prepared[:_MAX_PREVIEW_SAMPLES]
-            for i, p in enumerate(shown):
+            st.caption(_row_label(persona, variant))
+            for i, p in enumerate(prepared[:_MAX_PREVIEW_SAMPLES]):
                 question = (
                     p.question if len(p.question) <= 60 else p.question[:57] + "..."
                 )
@@ -383,31 +401,25 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         model = cached_model(model_name=model_name, remote=remote)
 
     try:
-        run_plan = _build_run_plan(selected_variants, runs)
         total_steps = len(run_plan)
-        step = 0
         results = []
-
-        for persona, qa_pairs, variant in run_plan:
-            display_name = (
-                BASELINE_PERSONA_NAME if variant == "baseline" else persona.name
-            )
+        for step, (persona, qa_pairs, variant) in enumerate(run_plan):
             progress.progress(
                 step / total_steps if total_steps else 1.0,
-                text=f"{display_name} · {prompt_variant_label(variant)} ({step + 1}/{total_steps})",
+                text=f"{_row_label(persona, variant)} ({step + 1}/{total_steps})",
             )
-            variant_results = run_extraction(
-                model=model,
-                model_name=model_name,
-                persona=persona,
-                qa_pairs=qa_pairs[:max_questions],
-                variants=(variant,),
-                mask_strategy=mask_strategy,
-                remote=remote,
-                on_status=_on_ndif_status if remote else None,
+            results.extend(
+                run_extraction(
+                    model=model,
+                    model_name=model_name,
+                    qa_pairs=qa_pairs[:max_questions],
+                    variants=(variant,),
+                    persona=persona,
+                    mask_strategy=mask_strategy,
+                    remote=remote,
+                    on_status=_on_ndif_status if remote else None,
+                )
             )
-            results.extend(variant_results)
-            step += 1
 
         progress.progress(1.0, text="Extraction complete")
     except Exception as exc:

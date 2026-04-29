@@ -5,11 +5,7 @@ from typing import Literal
 
 import torch
 from nnterp import StandardizedTransformer
-from persona_data.prompts import (
-    _normalize_messages,
-    format_roleplay_prompt,
-    system_prompt_for_variant,
-)
+from persona_data.prompts import _normalize_messages, format_roleplay_prompt
 from persona_data.synth_persona import PersonaData
 
 logger = logging.getLogger(__name__)
@@ -42,7 +38,9 @@ def resolve_system_prompt(
     if mode == "custom":
         return format_roleplay_prompt(mode="conversational")
     if mode in ("templated", "biography"):
-        return system_prompt_for_variant(persona, mode, mode="conversational")
+        return format_roleplay_prompt(
+            getattr(persona, f"{mode}_view"), mode="conversational"
+        )
     raise ValueError(f"Unsupported system prompt mode: {mode}")
 
 

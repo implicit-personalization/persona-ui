@@ -1,9 +1,14 @@
+from itertools import combinations
+
 import streamlit as st
 import torch
 from persona_data.environment import get_artifacts_dir
 from persona_data.prompts import BASELINE_PERSONA_ID
-from persona_vectors.analysis import LayeredSamples, load_persona_mean_samples
-from persona_vectors.artifacts import SUPPORTED_VARIANTS, ActivationStore
+from persona_vectors.analysis import load_persona_mean_samples
+from persona_vectors.artifacts import (
+    PERSONA_VARIANTS,
+    ActivationStore,
+)
 from persona_vectors.artifacts import list_layers as list_available_layers
 from persona_vectors.artifacts import list_personas as list_available_personas
 from persona_vectors.artifacts import load_mean_activations, load_persona_names
@@ -37,7 +42,6 @@ _list_layers_cached = st.cache_data(show_spinner=False)(list_available_layers)
 _LAST_COSINE_PERSONAS_KEY = "compare:last_personas:cosine"
 _LAST_PROJECTION_PERSONAS_KEY = "compare:last_personas:projection"
 _LAST_MASK_STRATEGY_KEY = "compare:last_mask_strategy"
-_COMPARABLE_VARIANTS = tuple(v for v in SUPPORTED_VARIANTS if v != "baseline")
 
 
 def _select_artifact_personas(
@@ -155,7 +159,7 @@ def _render_cosine_similarity(
     store: ActivationStore,
     mask_strategy: MaskStrategy,
 ) -> None:
-    if len(_COMPARABLE_VARIANTS) < 2:
+    if len(PERSONA_VARIANTS) < 2:
         st.info("Need at least two non-baseline variants for cosine comparison.")
         return
 
@@ -163,7 +167,7 @@ def _render_cosine_similarity(
     with col1:
         variant_a = st.selectbox(
             "Variant A",
-            options=_COMPARABLE_VARIANTS,
+            options=PERSONA_VARIANTS,
             index=0,
             format_func=prompt_variant_label,
             key=widget_key("load", "variant_a"),
@@ -171,8 +175,8 @@ def _render_cosine_similarity(
     with col2:
         variant_b = st.selectbox(
             "Variant B",
-            options=_COMPARABLE_VARIANTS,
-            index=min(1, len(_COMPARABLE_VARIANTS) - 1),
+            options=PERSONA_VARIANTS,
+            index=min(1, len(PERSONA_VARIANTS) - 1),
             format_func=prompt_variant_label,
             key=widget_key("load", "variant_b"),
         )
@@ -206,6 +210,13 @@ def _render_cosine_similarity(
         mask_strategy.value,
         variant_a,
         variant_b,
+    )
+    pairs_filename = _filename(
+        "compare",
+        "cosine_pairs",
+        store.model_name,
+        mask_strategy.value,
+        "_".join(PERSONA_VARIANTS),
     )
 
     if st.button("Compare vectors", type="primary"):
@@ -242,13 +253,57 @@ def _render_cosine_similarity(
             title=f"{prompt_variant_label(variant_a)} vs {prompt_variant_label(variant_b)}",
             show=False,
         )
-        st.session_state[cosine_fig_key] = (fig, len(traces))
+
+        pair_traces = []
+        pair_errors: list[str] = []
+        for left, right in combinations(PERSONA_VARIANTS, 2):
+            pair_data, _, pair_load_errors = load_mean_activations(
+                store.root_dir,
+                store.model_name,
+                persona_ids,
+                left,
+                right,
+                mask_strategy=mask_strategy,
+            )
+            pair_errors.extend(pair_load_errors)
+            if not pair_data:
+                continue
+            pair_traces.append(
+                (
+                    f"{prompt_variant_label(left)} vs {prompt_variant_label(right)}",
+                    torch.stack([short for _, short, _ in pair_data]).mean(dim=0),
+                    torch.stack([long for _, _, long in pair_data]).mean(dim=0),
+                )
+            )
+
+        if pair_errors:
+            for err in pair_errors:
+                st.warning(f"Skipped pair trace: `{err}`")
+        pair_fig = (
+            plot_layer_similarity(
+                pair_traces,
+                title="Variant-pair cosine similarity averaged over selected personas",
+                show=False,
+            )
+            if pair_traces
+            else None
+        )
+        st.session_state[cosine_fig_key] = (fig, pair_fig, len(traces), len(pair_traces))
 
     if cosine_fig_key in st.session_state:
-        fig, n_traces = st.session_state[cosine_fig_key]
+        fig, pair_fig, n_traces, n_pair_traces = st.session_state[cosine_fig_key]
         st.plotly_chart(fig, width="stretch")
-        _render_save_buttons([fig], [filename], "cosine")
+        figs = [fig]
+        filenames = [filename]
+        if pair_fig is not None:
+            st.subheader("Variant pairs")
+            st.plotly_chart(pair_fig, width="stretch")
+            figs.append(pair_fig)
+            filenames.append(pairs_filename)
+        _render_save_buttons(figs, filenames, "cosine")
         st.success(f"Loaded {n_traces} personas for cosine comparison.")
+        if pair_fig is not None:
+            st.caption(f"Generated {n_pair_traces} averaged variant-pair trace(s).")
 
 
 def _select_single_variant_samples(
@@ -258,9 +313,9 @@ def _select_single_variant_samples(
 ) -> tuple[str, list[str], str, list[int]] | None:
     variant = st.selectbox(
         "Variant",
-        options=_COMPARABLE_VARIANTS,
-        index=_COMPARABLE_VARIANTS.index("biography")
-        if "biography" in _COMPARABLE_VARIANTS
+        options=PERSONA_VARIANTS,
+        index=PERSONA_VARIANTS.index("biography")
+        if "biography" in PERSONA_VARIANTS
         else 0,
         format_func=prompt_variant_label,
         key=widget_key("load", "variant", scope),
@@ -316,7 +371,7 @@ def _baseline_available(
     return BASELINE_PERSONA_ID in list_available_personas(
         store.root_dir,
         store.model_name,
-        ["baseline"],
+        [BASELINE_PERSONA_ID],
         mask_strategy=mask_strategy,
         warn_missing=False,
     )
@@ -336,27 +391,8 @@ def _render_baseline_reference_toggle(
         help=(
             "Adds the single saved baseline artifact as one reference sample."
             if available
-            else "Run extraction for the baseline variant first."
+            else "Run Assistant baseline extraction first."
         ),
-    )
-
-
-def _append_baseline_reference(
-    store: ActivationStore,
-    mask_strategy: MaskStrategy,
-    samples: LayeredSamples,
-) -> LayeredSamples:
-    baseline_samples = load_persona_mean_samples(
-        store.root_dir,
-        store.model_name,
-        "baseline",
-        mask_strategy=mask_strategy,
-        persona_ids=[BASELINE_PERSONA_ID],
-    )
-    return LayeredSamples(
-        vectors=torch.cat([samples.vectors, baseline_samples.vectors], dim=0),
-        labels=[*samples.labels, *baseline_samples.labels],
-        hover_text=[*samples.hover_text, *baseline_samples.hover_text],
     )
 
 
@@ -386,7 +422,7 @@ def _render_similarity_matrix(
         variant,
         "persona_mean",
         persona_key,
-        "baseline" if include_baseline else "no_baseline",
+        BASELINE_PERSONA_ID if include_baseline else "no_baseline",
     )
     filename = _filename(
         "compare",
@@ -396,7 +432,7 @@ def _render_similarity_matrix(
         variant,
         "persona_mean",
         persona_key,
-        "baseline" if include_baseline else "",
+        BASELINE_PERSONA_ID if include_baseline else "",
     )
 
     if st.button("Generate similarity matrix", type="primary"):
@@ -407,9 +443,8 @@ def _render_similarity_matrix(
                 variant,
                 mask_strategy=mask_strategy,
                 persona_ids=persona_ids,
+                include_baseline=include_baseline,
             )
-            if include_baseline:
-                samples = _append_baseline_reference(store, mask_strategy, samples)
             matrix_fig = build_layered_figure(
                 samples,
                 "similarity",
@@ -479,7 +514,7 @@ def _render_embedding_analysis(
         variant,
         "persona_mean",
         persona_key,
-        "baseline" if include_baseline else "no_baseline",
+        BASELINE_PERSONA_ID if include_baseline else "no_baseline",
     )
     filename = _filename(
         "compare",
@@ -489,7 +524,7 @@ def _render_embedding_analysis(
         variant,
         "persona_mean",
         persona_key,
-        "baseline" if include_baseline else "",
+        BASELINE_PERSONA_ID if include_baseline else "",
     )
 
     if st.button(f"Generate {analysis_mode} projection", type="primary"):
@@ -500,9 +535,8 @@ def _render_embedding_analysis(
                 variant,
                 mask_strategy=mask_strategy,
                 persona_ids=persona_ids,
+                include_baseline=include_baseline,
             )
-            if include_baseline:
-                samples = _append_baseline_reference(store, mask_strategy, samples)
             fig = build_layered_figure(
                 samples,
                 figure_kind,
