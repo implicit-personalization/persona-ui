@@ -1239,7 +1239,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "persona-data", specifier = ">=0.2.5" },
-    { name = "persona-vectors", specifier = ">=0.4.0" },
+    { name = "persona-vectors", specifier = ">=0.4.1" },
     { name = "plotly", specifier = ">=6.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "streamlit", specifier = ">=1.44.0" },
@@ -1248,7 +1248,7 @@ requires-dist = [
 
 [[package]]
 name = "persona-vectors"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kaleido" },
@@ -1265,9 +1265,9 @@ dependencies = [
     { name = "transformers" },
     { name = "umap-learn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c4/f8/b2b9f8f6d7510c15e7a90d9f01c2df059cd3132c50ebd28f358a13cc1660/persona_vectors-0.4.0.tar.gz", hash = "sha256:e3057f7217f6c179eb003f50973e16160230d9c430fcc2f1380e0633c1c596dd", size = 20830, upload-time = "2026-04-29T09:40:01.563Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/55/4aa2f8dd2b4411e87cadf4dad421e0ffd2c68461e1b4087339c8bd17a857/persona_vectors-0.4.1.tar.gz", hash = "sha256:60a7ff64fd90938da7ee767fd88dac419897a26a24f28b29b5f5b34bccef143a", size = 21116, upload-time = "2026-04-29T10:45:51.396Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/57/53/8266e7649c7e565bad92a14d7dc439f58dba9b64871e68ff887fed4214b6/persona_vectors-0.4.0-py3-none-any.whl", hash = "sha256:d305728fe83db2c302b3d049084f84d6a8da5b4698950033e789249c723270d3", size = 24732, upload-time = "2026-04-29T09:40:00.405Z" },
+    { url = "https://files.pythonhosted.org/packages/02/e6/4c3824d92a366b42a1c70474c7df03f5f81a985924eb6998e93bd0124937/persona_vectors-0.4.1-py3-none-any.whl", hash = "sha256:6b889f5cf790ad45afed24dad1f2a2d48b3fb18bb23959d31200e9ffafe8f1fa", size = 25009, upload-time = "2026-04-29T10:45:52.445Z" },
 ]
 
 [[package]]

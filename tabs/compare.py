@@ -1,17 +1,16 @@
 from itertools import combinations
 
 import streamlit as st
-import torch
 from persona_data.environment import get_artifacts_dir
 from persona_data.prompts import BASELINE_PERSONA_ID
-from persona_vectors.analysis import load_persona_mean_samples
-from persona_vectors.artifacts import (
-    PERSONA_VARIANTS,
-    ActivationStore,
+from persona_vectors.analysis import (
+    load_persona_mean_samples,
+    load_variant_mean_samples,
 )
+from persona_vectors.artifacts import PERSONA_VARIANTS, ActivationStore
 from persona_vectors.artifacts import list_layers as list_available_layers
 from persona_vectors.artifacts import list_personas as list_available_personas
-from persona_vectors.artifacts import load_mean_activations, load_persona_names
+from persona_vectors.artifacts import load_persona_names
 from persona_vectors.extraction import MaskStrategy
 from persona_vectors.plots import (
     build_layered_figure,
@@ -220,33 +219,27 @@ def _render_cosine_similarity(
     )
 
     if st.button("Compare vectors", type="primary"):
-        traces, loaded_names, errors = load_mean_activations(
-            store.root_dir,
-            store.model_name,
-            persona_ids,
-            variant_a,
-            variant_b,
-            mask_strategy=mask_strategy,
-        )
-
-        if errors:
-            for err in errors:
-                st.error(f"Failed to load vectors: `{err}`")
-        if not traces:
-            st.error("No personas loaded successfully.")
-            st.info(
-                "Check that extraction has been run for both variants and selected personas."
+        try:
+            variant_samples = load_variant_mean_samples(
+                store.root_dir,
+                store.model_name,
+                [variant_a, variant_b],
+                mask_strategy=mask_strategy,
+                persona_ids=persona_ids,
             )
+        except Exception as exc:
+            st.error(f"Could not load vectors: {exc}")
             st.session_state.pop(cosine_fig_key, None)
             return
 
+        labels = variant_samples[variant_a].labels
         display_traces = [
             (
-                persona_display_label(persona_id, loaded_names.get(persona_id)),
-                short,
-                long,
+                label,
+                variant_samples[variant_a].vectors[index],
+                variant_samples[variant_b].vectors[index],
             )
-            for persona_id, short, long in traces
+            for index, label in enumerate(labels)
         ]
         fig = plot_layer_similarity(
             display_traces,
@@ -255,24 +248,28 @@ def _render_cosine_similarity(
         )
 
         pair_traces = []
-        pair_errors: list[str] = []
+        pair_errors = []
         for left, right in combinations(PERSONA_VARIANTS, 2):
-            pair_data, _, pair_load_errors = load_mean_activations(
-                store.root_dir,
-                store.model_name,
-                persona_ids,
-                left,
-                right,
-                mask_strategy=mask_strategy,
-            )
-            pair_errors.extend(pair_load_errors)
-            if not pair_data:
+            try:
+                pair_samples = (
+                    variant_samples
+                    if {left, right} == {variant_a, variant_b}
+                    else load_variant_mean_samples(
+                        store.root_dir,
+                        store.model_name,
+                        [left, right],
+                        mask_strategy=mask_strategy,
+                        persona_ids=persona_ids,
+                    )
+                )
+            except Exception as exc:
+                pair_errors.append(f"{left} vs {right}: {exc}")
                 continue
             pair_traces.append(
                 (
                     f"{prompt_variant_label(left)} vs {prompt_variant_label(right)}",
-                    torch.stack([short for _, short, _ in pair_data]).mean(dim=0),
-                    torch.stack([long for _, _, long in pair_data]).mean(dim=0),
+                    pair_samples[left].vectors.mean(dim=0),
+                    pair_samples[right].vectors.mean(dim=0),
                 )
             )
 
@@ -288,7 +285,12 @@ def _render_cosine_similarity(
             if pair_traces
             else None
         )
-        st.session_state[cosine_fig_key] = (fig, pair_fig, len(traces), len(pair_traces))
+        st.session_state[cosine_fig_key] = (
+            fig,
+            pair_fig,
+            len(display_traces),
+            len(pair_traces),
+        )
 
     if cosine_fig_key in st.session_state:
         fig, pair_fig, n_traces, n_pair_traces = st.session_state[cosine_fig_key]
@@ -314,9 +316,11 @@ def _select_single_variant_samples(
     variant = st.selectbox(
         "Variant",
         options=PERSONA_VARIANTS,
-        index=PERSONA_VARIANTS.index("biography")
-        if "biography" in PERSONA_VARIANTS
-        else 0,
+        index=(
+            PERSONA_VARIANTS.index("biography")
+            if "biography" in PERSONA_VARIANTS
+            else 0
+        ),
         format_func=prompt_variant_label,
         key=widget_key("load", "variant", scope),
     )
@@ -542,8 +546,7 @@ def _render_embedding_analysis(
                 figure_kind,
                 layers=selected_layers,
                 title=(
-                    f"{analysis_mode} - "
-                    f"{prompt_variant_label(variant)} - Persona means"
+                    f"{analysis_mode} - {prompt_variant_label(variant)} - Persona means"
                 ),
             )
             st.session_state[fig_key] = (fig, samples.vectors.shape[0])

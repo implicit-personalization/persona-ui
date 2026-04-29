@@ -79,7 +79,10 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
                             if REMOTE_DEFAULT_MODEL in remote_models
                             else remote_models[0]
                         )
-                    if st.session_state.get("sidebar__remote_model") not in remote_models:
+                    if (
+                        st.session_state.get("sidebar__remote_model")
+                        not in remote_models
+                    ):
                         st.session_state["sidebar__remote_model"] = default_model
                     selected_remote_model = st.selectbox(
                         "Model",
@@ -95,7 +98,9 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
                     "Model",
                     value=st.session_state.get(
                         "sidebar__remote_model_custom_value",
-                        st.session_state.get(_LAST_REMOTE_MODEL_KEY, REMOTE_DEFAULT_MODEL),
+                        st.session_state.get(
+                            _LAST_REMOTE_MODEL_KEY, REMOTE_DEFAULT_MODEL
+                        ),
                     ),
                     key="sidebar__remote_model_custom_value",
                     help="NDIF model id. Use this to cold-load a remote model.",
