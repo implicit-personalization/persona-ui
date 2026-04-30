@@ -1225,7 +1225,7 @@ wheels = [
 
 [[package]]
 name = "persona-ui"
-version = "0.2.0"
+version = "0.2.1"
 source = { virtual = "." }
 dependencies = [
     { name = "persona-data" },
@@ -1239,7 +1239,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "persona-data", specifier = ">=0.2.5" },
-    { name = "persona-vectors", specifier = ">=0.4.1" },
+    { name = "persona-vectors", specifier = ">=0.4.2" },
     { name = "plotly", specifier = ">=6.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "streamlit", specifier = ">=1.44.0" },
@@ -1248,7 +1248,7 @@ requires-dist = [
 
 [[package]]
 name = "persona-vectors"
-version = "0.4.1"
+version = "0.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kaleido" },
@@ -1265,9 +1265,9 @@ dependencies = [
     { name = "transformers" },
     { name = "umap-learn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0b/55/4aa2f8dd2b4411e87cadf4dad421e0ffd2c68461e1b4087339c8bd17a857/persona_vectors-0.4.1.tar.gz", hash = "sha256:60a7ff64fd90938da7ee767fd88dac419897a26a24f28b29b5f5b34bccef143a", size = 21116, upload-time = "2026-04-29T10:45:51.396Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/48/e9ea34cd42213868b0e569bc25045f4098ab0fe483421f4eed3f4204f91d/persona_vectors-0.4.2.tar.gz", hash = "sha256:5c421ce6904cf7c92b8fb9ecf27a95d48a381ea307dae3dd67db54c11e9c0892", size = 21509, upload-time = "2026-04-29T14:24:00.304Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/e6/4c3824d92a366b42a1c70474c7df03f5f81a985924eb6998e93bd0124937/persona_vectors-0.4.1-py3-none-any.whl", hash = "sha256:6b889f5cf790ad45afed24dad1f2a2d48b3fb18bb23959d31200e9ffafe8f1fa", size = 25009, upload-time = "2026-04-29T10:45:52.445Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/2f/be21db62788f9880bba713412ee8ad04d9388d749346437c445d83f5bbfb/persona_vectors-0.4.2-py3-none-any.whl", hash = "sha256:c672b91e7b34d02e8ec967e698bcd3b307305cdce02322e9f8e047f9984e264e", size = 25441, upload-time = "2026-04-29T14:23:59.129Z" },
 ]
 
 [[package]]

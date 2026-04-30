@@ -1,11 +1,11 @@
 [project]
 name = "persona-ui"
-version = "0.2.0"
+version = "0.2.1"
 description = "Streamlit UI for persona-vectors"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "persona-vectors>=0.4.1",
+    "persona-vectors>=0.4.2",
     "persona-data>=0.2.5",
     "streamlit>=1.44.0",
     "plotly>=6.6.0",

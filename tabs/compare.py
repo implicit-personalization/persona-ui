@@ -7,10 +7,8 @@ from persona_vectors.analysis import (
     load_persona_mean_samples,
     load_variant_mean_samples,
 )
-from persona_vectors.artifacts import PERSONA_VARIANTS, ActivationStore
+from persona_vectors.artifacts import ActivationStore
 from persona_vectors.artifacts import list_layers as list_available_layers
-from persona_vectors.artifacts import list_personas as list_available_personas
-from persona_vectors.artifacts import load_persona_names
 from persona_vectors.extraction import MaskStrategy
 from persona_vectors.plots import (
     build_layered_figure,
@@ -52,18 +50,10 @@ def _select_artifact_personas(
     remember_key: str,
     default_all: bool = False,
 ) -> tuple[list[str], dict[str, str]]:
-    persona_options = list_available_personas(
-        store.root_dir,
-        store.model_name,
-        variants,
-        mask_strategy=mask_strategy,
-    )
-    persona_names = load_persona_names(
-        store.root_dir,
-        store.model_name,
-        variants,
+    persona_options = store.list_personas(variants)
+    persona_names = store.persona_names(
         persona_options,
-        mask_strategy=mask_strategy,
+        variants=variants,
     )
     if not persona_options:
         if len(variants) > 1:
@@ -158,7 +148,8 @@ def _render_cosine_similarity(
     store: ActivationStore,
     mask_strategy: MaskStrategy,
 ) -> None:
-    if len(PERSONA_VARIANTS) < 2:
+    variants = list(store.variants)
+    if len(variants) < 2:
         st.info("Need at least two non-baseline variants for cosine comparison.")
         return
 
@@ -166,7 +157,7 @@ def _render_cosine_similarity(
     with col1:
         variant_a = st.selectbox(
             "Variant A",
-            options=PERSONA_VARIANTS,
+            options=variants,
             index=0,
             format_func=prompt_variant_label,
             key=widget_key("load", "variant_a"),
@@ -174,8 +165,8 @@ def _render_cosine_similarity(
     with col2:
         variant_b = st.selectbox(
             "Variant B",
-            options=PERSONA_VARIANTS,
-            index=min(1, len(PERSONA_VARIANTS) - 1),
+            options=variants,
+            index=min(1, len(variants) - 1),
             format_func=prompt_variant_label,
             key=widget_key("load", "variant_b"),
         )
@@ -215,16 +206,14 @@ def _render_cosine_similarity(
         "cosine_pairs",
         store.model_name,
         mask_strategy.value,
-        "_".join(PERSONA_VARIANTS),
+        "_".join(variants),
     )
 
     if st.button("Compare vectors", type="primary"):
         try:
             variant_samples = load_variant_mean_samples(
-                store.root_dir,
-                store.model_name,
+                store,
                 [variant_a, variant_b],
-                mask_strategy=mask_strategy,
                 persona_ids=persona_ids,
             )
         except Exception as exc:
@@ -249,16 +238,14 @@ def _render_cosine_similarity(
 
         pair_traces = []
         pair_errors = []
-        for left, right in combinations(PERSONA_VARIANTS, 2):
+        for left, right in combinations(variants, 2):
             try:
                 pair_samples = (
                     variant_samples
                     if {left, right} == {variant_a, variant_b}
                     else load_variant_mean_samples(
-                        store.root_dir,
-                        store.model_name,
+                        store,
                         [left, right],
-                        mask_strategy=mask_strategy,
                         persona_ids=persona_ids,
                     )
                 )
@@ -313,12 +300,13 @@ def _select_single_variant_samples(
     mask_strategy: MaskStrategy,
     scope: str,
 ) -> tuple[str, list[str], str, list[int]] | None:
+    variants = list(store.variants)
     variant = st.selectbox(
         "Variant",
-        options=PERSONA_VARIANTS,
+        options=variants,
         index=(
-            PERSONA_VARIANTS.index("biography")
-            if "biography" in PERSONA_VARIANTS
+            variants.index("biography")
+            if "biography" in variants
             else 0
         ),
         format_func=prompt_variant_label,
@@ -370,13 +358,9 @@ def _select_single_variant_samples(
 
 def _baseline_available(
     store: ActivationStore,
-    mask_strategy: MaskStrategy,
 ) -> bool:
-    return BASELINE_PERSONA_ID in list_available_personas(
-        store.root_dir,
-        store.model_name,
+    return BASELINE_PERSONA_ID in store.list_personas(
         [BASELINE_PERSONA_ID],
-        mask_strategy=mask_strategy,
         warn_missing=False,
     )
 
@@ -386,7 +370,7 @@ def _render_baseline_reference_toggle(
     mask_strategy: MaskStrategy,
     scope: str,
 ) -> bool:
-    available = _baseline_available(store, mask_strategy)
+    available = _baseline_available(store)
     return st.checkbox(
         "Include Assistant baseline reference",
         value=available,
@@ -442,8 +426,7 @@ def _render_similarity_matrix(
     if st.button("Generate similarity matrix", type="primary"):
         try:
             samples = load_persona_mean_samples(
-                store.root_dir,
-                store.model_name,
+                store,
                 variant,
                 mask_strategy=mask_strategy,
                 persona_ids=persona_ids,
@@ -534,8 +517,7 @@ def _render_embedding_analysis(
     if st.button(f"Generate {analysis_mode} projection", type="primary"):
         try:
             samples = load_persona_mean_samples(
-                store.root_dir,
-                store.model_name,
+                store,
                 variant,
                 mask_strategy=mask_strategy,
                 persona_ids=persona_ids,
@@ -575,8 +557,6 @@ def render_compare_tab(model_name: str) -> None:
             value=str(get_artifacts_dir() / "activations"),
         )
 
-    store = ActivationStore(model_name, artifacts_root)
-
     analysis_mode = st.segmented_control(
         "Analysis mode",
         options=ANALYSIS_MODES,
@@ -588,6 +568,7 @@ def render_compare_tab(model_name: str) -> None:
         analysis_mode = ANALYSIS_MODES[0]
     st.caption(ANALYSIS_HELP_TEXT[analysis_mode])
     mask_strategy = _render_mask_strategy_select(analysis_mode)
+    store = ActivationStore(model_name, artifacts_root, mask_strategy=mask_strategy)
 
     if analysis_mode == "Cosine similarity":
         _render_cosine_similarity(store, mask_strategy)
