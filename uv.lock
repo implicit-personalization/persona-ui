@@ -353,11 +353,11 @@ wheels = [
 
 [[package]]
 name = "fsspec"
-version = "2026.3.0"
+version = "2026.4.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e1/cf/b50ddf667c15276a9ab15a70ef5f257564de271957933ffea49d2cdbcdfb/fsspec-2026.3.0.tar.gz", hash = "sha256:1ee6a0e28677557f8c2f994e3eea77db6392b4de9cd1f5d7a9e87a0ae9d01b41", size = 313547, upload-time = "2026-03-27T19:11:14.892Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/8d/1c51c094345df128ca4a990d633fe1a0ff28726c9e6b3c41ba65087bba1d/fsspec-2026.4.0.tar.gz", hash = "sha256:301d8ac70ae90ef3ad05dcf94d6c3754a097f9b5fe4667d2787aa359ec7df7e4", size = 312760, upload-time = "2026-04-29T20:42:38.635Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d5/1f/5f4a3cd9e4440e9d9bc78ad0a91a1c8d46b4d429d5239ebe6793c9fe5c41/fsspec-2026.3.0-py3-none-any.whl", hash = "sha256:d2ceafaad1b3457968ed14efa28798162f1638dbb5d2a6868a2db002a5ee39a4", size = 202595, upload-time = "2026-03-27T19:11:13.595Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/0c/043d5e551459da400957a1395e0febbf771446ff34291afcbe3d8be2a279/fsspec-2026.4.0-py3-none-any.whl", hash = "sha256:11ef7bb35dab8a394fde6e608221d5cf3e8499401c249bebaeaad760a1a8dec2", size = 203402, upload-time = "2026-04-29T20:42:36.842Z" },
 ]
 
 [[package]]
@@ -484,7 +484,7 @@ wheels = [
 
 [[package]]
 name = "huggingface-hub"
-version = "1.12.2"
+version = "1.13.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
@@ -497,9 +497,9 @@ dependencies = [
     { name = "typer" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3e/9f/3fda8b014db3ae239addc9b48b35c2cf7d318950b430712f34a2473ef81d/huggingface_hub-1.12.2.tar.gz", hash = "sha256:282c4999e641c89affdc4c02c265eddea944c1390dc19e89dac8ad3ae76dbdaf", size = 763393, upload-time = "2026-04-29T09:45:09.202Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/89/ff/ec7ed2eb43bd7ce8bb2233d109cc235c3e807ffe5e469dc09db261fac05e/huggingface_hub-1.13.0.tar.gz", hash = "sha256:f6df2dac5abe82ce2fe05873d10d5ff47bc677d616a2f521f4ee26db9415d9d0", size = 781788, upload-time = "2026-04-30T11:57:33.858Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/71/c1/1fa4162f6dd53259daf2ad31385273341821fa0acce164cd03971937a60e/huggingface_hub-1.12.2-py3-none-any.whl", hash = "sha256:7968e897fdbc6343c871c240d87d4434efe0ad9f80d57daa1cc5678c6d148529", size = 647757, upload-time = "2026-04-29T09:45:07.63Z" },
+    { url = "https://files.pythonhosted.org/packages/93/db/4b1cdae9460ae1f3ca020cd767f013430ce23eb1d9c890ae3a0609b38d26/huggingface_hub-1.13.0-py3-none-any.whl", hash = "sha256:e942cb50d6a08dd5306688b1ac05bda157fd2fcc88b63dae405f7bd0d3234005", size = 660643, upload-time = "2026-04-30T11:57:31.802Z" },
 ]
 
 [[package]]
@@ -1209,7 +1209,7 @@ wheels = [
 
 [[package]]
 name = "persona-data"
-version = "0.2.5"
+version = "0.2.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -1218,9 +1218,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "torch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e2/93/694d05273378f142c188b8a4826f962c89d1f449ed5949806a98a3912647/persona_data-0.2.5.tar.gz", hash = "sha256:d20a55fe488d61034ab2449a460e744a99a3aaa3ead128e5fe832ea14eb31c51", size = 8546, upload-time = "2026-04-29T09:25:59.28Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e9/c1/8612da5d216e484f823333fcf6bc1ff97c266c800b597d70f9a19475b78e/persona_data-0.2.7.tar.gz", hash = "sha256:6cd95f82d628a2add68df3935ae47c36a13ab17bafaf495892be5b1192f4693e", size = 9143, upload-time = "2026-05-01T08:54:26.603Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/de/06/6f81542a68c97fbbc6fabae7b4f406b046c61787977f623199172292bd5e/persona_data-0.2.5-py3-none-any.whl", hash = "sha256:70e8caa15ab31e8a2bd1e248d02acf118a43725acd262b10b594ee754986f2a9", size = 11199, upload-time = "2026-04-29T09:25:58.119Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/ad/65fff568431ae5620f15d5b9c1dff9a941fc77f8c6ebb6f3131c9010d713/persona_data-0.2.7-py3-none-any.whl", hash = "sha256:4395f46381d54e7047bd26a4eaa2e9db1bd29f80e00a813b8be3ede0192aafcb", size = 11832, upload-time = "2026-05-01T08:54:25.778Z" },
 ]
 
 [[package]]
@@ -1238,8 +1238,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "persona-data", specifier = ">=0.2.5" },
-    { name = "persona-vectors", specifier = ">=0.4.2" },
+    { name = "persona-data", specifier = ">=0.2.7" },
+    { name = "persona-vectors", specifier = ">=0.4.3" },
     { name = "plotly", specifier = ">=6.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "streamlit", specifier = ">=1.44.0" },
@@ -1248,7 +1248,7 @@ requires-dist = [
 
 [[package]]
 name = "persona-vectors"
-version = "0.4.2"
+version = "0.4.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kaleido" },
@@ -1265,9 +1265,9 @@ dependencies = [
     { name = "transformers" },
     { name = "umap-learn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/01/48/e9ea34cd42213868b0e569bc25045f4098ab0fe483421f4eed3f4204f91d/persona_vectors-0.4.2.tar.gz", hash = "sha256:5c421ce6904cf7c92b8fb9ecf27a95d48a381ea307dae3dd67db54c11e9c0892", size = 21509, upload-time = "2026-04-29T14:24:00.304Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/15/97/5f89f74a98faec09696108a1b2222a5d0bc99c129e035939ba8a70a61314/persona_vectors-0.4.3.tar.gz", hash = "sha256:3b86bed93373868506f1f6006f65e849d560bd20fb771310a33a674f02a90b0b", size = 21614, upload-time = "2026-05-01T16:49:11.757Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6b/2f/be21db62788f9880bba713412ee8ad04d9388d749346437c445d83f5bbfb/persona_vectors-0.4.2-py3-none-any.whl", hash = "sha256:c672b91e7b34d02e8ec967e698bcd3b307305cdce02322e9f8e047f9984e264e", size = 25441, upload-time = "2026-04-29T14:23:59.129Z" },
+    { url = "https://files.pythonhosted.org/packages/92/de/a666ee51901db501556e9f7014e7f61741df8f2b219ff676179b80e94cd4/persona_vectors-0.4.3-py3-none-any.whl", hash = "sha256:50bfb2de68613ec89a87f5773f4d2f5fe9981e2949f82e4823cd4f4ca093bee3", size = 25563, upload-time = "2026-05-01T16:49:12.694Z" },
 ]
 
 [[package]]
@@ -2462,7 +2462,7 @@ wheels = [
 
 [[package]]
 name = "typer"
-version = "0.25.0"
+version = "0.25.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -2470,9 +2470,9 @@ dependencies = [
     { name = "rich" },
     { name = "shellingham" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7b/27/ede8cec7596e0041ba7e7b80b47d132562f56ff454313a16f6084e555c9f/typer-0.25.0.tar.gz", hash = "sha256:123eaf9f19bb40fd268310e12a542c0c6b4fab9c98d9d23342a01ff95e3ce930", size = 120150, upload-time = "2026-04-26T08:46:14.767Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/51/9aed62104cea109b820bbd6c14245af756112017d309da813ef107d42e7e/typer-0.25.1.tar.gz", hash = "sha256:9616eb8853a09ffeabab1698952f33c6f29ffdbceb4eaeecf571880e8d7664cc", size = 122276, upload-time = "2026-04-30T19:32:16.964Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/72/193d4e586ec5a4db834a36bbeb47641a62f951f114ffd0fe5b1b46e8d56f/typer-0.25.0-py3-none-any.whl", hash = "sha256:ac01b48823d3db9a83c9e164338057eadbb1c9957a2a6b4eeb486669c560b5dc", size = 55993, upload-time = "2026-04-26T08:46:15.889Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/f9/2b3ff4e56e5fa7debfaf9eb135d0da96f3e9a1d5b27222223c7296336e5f/typer-0.25.1-py3-none-any.whl", hash = "sha256:75caa44ed46a03fb2dab8808753ffacdbfea88495e74c85a28c5eefcf5f39c89", size = 58409, upload-time = "2026-04-30T19:32:18.271Z" },
 ]
 
 [[package]]

@@ -1,14 +1,12 @@
-import logging
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Literal
 
 import torch
 from nnterp import StandardizedTransformer
-from persona_data.prompts import _normalize_messages, format_roleplay_prompt
+from persona_data.prompts import format_messages, format_prompt
 from persona_data.synth_persona import PersonaData
 
-logger = logging.getLogger(__name__)
 SystemPromptMode = Literal["empty", "templated", "biography", "custom"]
 
 
@@ -36,73 +34,10 @@ def resolve_system_prompt(
     if persona is None or mode == "empty":
         return ""
     if mode == "custom":
-        return format_roleplay_prompt(mode="conversational")
+        return format_prompt(mode="conversational")
     if mode in ("templated", "biography"):
-        return format_roleplay_prompt(
-            getattr(persona, f"{mode}_view"), mode="conversational"
-        )
+        return format_prompt(persona, mode, mode="conversational")
     raise ValueError(f"Unsupported system prompt mode: {mode}")
-
-
-def _format_plain_messages(messages: list[dict[str, str]]) -> str:
-    """Format messages as plain ``Role: content`` text, used as a last-resort fallback."""
-    lines: list[str] = []
-
-    for message in messages:
-        role = message["role"]
-        content = message["content"]
-
-        if role == "system":
-            if content:
-                lines.append(f"System: {content}")
-        elif role == "user":
-            lines.append(f"User: {content}")
-        elif role == "assistant":
-            lines.append(f"Assistant: {content}")
-        else:
-            lines.append(f"{role.title()}: {content}")
-
-    if not lines or not lines[-1].startswith("Assistant:"):
-        lines.append("Assistant:")
-
-    return "\n\n".join(lines)
-
-
-def format_generation_prompt(
-    messages: list[dict[str, str]], tokenizer: object
-) -> tuple[str, int]:
-    """Render messages into a single prompt string and count prompt tokens.
-
-    Tries the tokenizer's chat template first, falls back to normalized messages,
-    then to a plain-text format if both template attempts fail.
-    """
-    try:
-        prompt = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-    except Exception:
-        logger.debug(
-            "Chat template failed on raw messages, trying normalized", exc_info=True
-        )
-        messages = _normalize_messages(messages)
-
-        try:
-            prompt = tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-        except Exception:
-            logger.debug(
-                "Chat template failed on normalized messages, falling back to plain format",
-                exc_info=True,
-            )
-            prompt = _format_plain_messages(messages)
-
-    prompt_token_count = tokenizer(prompt, return_tensors="pt").input_ids.shape[1]
-    return prompt, prompt_token_count
 
 
 @contextmanager
@@ -161,7 +96,9 @@ def generate_chat_reply(
     """
 
     tokenizer = model.tokenizer
-    prompt, prompt_token_count = format_generation_prompt(messages, tokenizer)
+    prompt, prompt_token_count = format_messages(
+        messages, tokenizer, add_generation_prompt=True
+    )
 
     generation_kwargs: dict[str, object] = {
         "max_new_tokens": max_new_tokens,

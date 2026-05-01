@@ -5,14 +5,15 @@ import streamlit as st
 from persona_data.prompts import (
     BASELINE_PERSONA_ID,
     BASELINE_PERSONA_NAME,
-    format_roleplay_prompt,
+    format_prompt,
 )
 from persona_data.synth_persona import PersonaData, QAPair
 from persona_vectors.artifacts import PERSONA_VARIANTS
 from persona_vectors.extraction import (
     MaskStrategy,
-    PreparedInput,
+    TokenSegment,
     prepare_inputs_for_strategy,
+    preview_token_segments,
     run_extraction,
 )
 
@@ -77,54 +78,24 @@ _TOKEN_LEGEND = (
 _MAX_PREVIEW_SAMPLES = 3
 
 
-def _token_style_for_index(
-    p: PreparedInput, token_idx: int, special_ids: set[int]
-) -> str:
-    if p.spans.response.token_start <= token_idx < p.spans.response.token_end:
-        style = "color:#22d3ee"
-    elif p.spans.question.token_start <= token_idx < p.spans.question.token_end:
-        style = "color:#fde047"
-    else:
-        style = "color:#9ca3af"
+def _token_style(segment: TokenSegment) -> str:
+    style = {
+        "response": "color:#22d3ee",
+        "question": "color:#fde047",
+    }.get(segment.role, "color:#9ca3af")
 
-    if int(p.input_ids[token_idx]) in special_ids:
+    if segment.is_special:
         style = "color:#d946ef;font-weight:bold"
-    if p.token_mask[token_idx]:
+    if segment.is_masked:
         style = f"{style};background:#86efac;border-radius:2px;padding:0 1px"
     return style
 
 
-def _render_sample_tokens_html(
-    p: PreparedInput, tokenizer, *, max_tokens: int = 200
-) -> str:
-    """Build an HTML token sequence using the persona-vectors preview layout."""
-    special_ids = set(tokenizer.all_special_ids)
-    seq_len = int(p.input_ids.shape[0])
-    edge = max(8, max_tokens // 4)
-
-    prefix_end = min(p.spans.template.token_start + max_tokens, seq_len)
-    tail_start = min(max(prefix_end, p.spans.template.token_end - edge), seq_len)
-    answer_end = min(seq_len, p.spans.response.token_end + edge)
-
-    indices: list[int | None] = list(range(0, prefix_end))
-    if prefix_end < tail_start:
-        indices.append(None)
-    indices.extend(range(tail_start, answer_end))
-    if answer_end < seq_len:
-        indices.append(None)
-
+def _render_sample_tokens_html(p, tokenizer, *, max_tokens: int = 200) -> str:
     spans: list[str] = []
-    for idx in indices:
-        if idx is None:
-            spans.append('<span style="color:#9ca3af"> … </span>')
-            continue
-        char_start, char_end = p.offset_mapping[idx]
-        raw = p.prompt_text[char_start:char_end]
-        if not raw:
-            raw = tokenizer.convert_ids_to_tokens([int(p.input_ids[idx])])[0]
-        escaped = html.escape(raw)
+    for segment in preview_token_segments(p, tokenizer, max_tokens=max_tokens):
         spans.append(
-            f'<span style="{_token_style_for_index(p, idx, special_ids)}">{escaped}</span>'
+            f'<span style="{_token_style(segment)}">{html.escape(segment.text)}</span>'
         )
 
     return (
@@ -357,9 +328,9 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         st.markdown(_TOKEN_LEGEND, unsafe_allow_html=True)
         for persona, qa_pairs, variant in run_plan:
             system_prompt = (
-                format_roleplay_prompt()
+                format_prompt()
                 if persona is None
-                else format_roleplay_prompt(getattr(persona, f"{variant}_view"))
+                else format_prompt(persona, variant)  # type: ignore[arg-type]
             )
             prepared = prepare_inputs_for_strategy(
                 tokenizer=model.tokenizer,

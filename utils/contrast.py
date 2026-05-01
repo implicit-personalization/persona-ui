@@ -18,7 +18,7 @@ from html import escape
 import torch
 from nnterp import StandardizedTransformer
 
-from utils.chat import format_generation_prompt
+from persona_data.prompts import format_messages
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,9 @@ def _prepare_trace_text(
     response_ids: torch.Tensor,
 ) -> tuple[str, int, int]:
     """Build the trace text and return ``(full_text, n_ctx, n_resp)``."""
-    context_prompt, _ = format_generation_prompt(context_messages, tokenizer)
+    context_prompt, _ = format_messages(
+        context_messages, tokenizer, add_generation_prompt=True
+    )
     context_ids = tokenizer(context_prompt, return_tensors="pt").input_ids[0]
     response_text = _decode_ids(tokenizer, response_ids.tolist())
     full_text = context_prompt + response_text
