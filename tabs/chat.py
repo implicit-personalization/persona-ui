@@ -169,10 +169,9 @@ def render_system_prompt(
     return st.session_state.get(prompt_key) or None
 
 
-def generation_dict(gen_kwargs: dict, advanced_generation: bool) -> dict[str, object]:
+def generation_dict(gen_kwargs: dict) -> dict[str, object]:
     return {
         "max_new_tokens": int(gen_kwargs["max_new_tokens"]),
-        "advanced_generation": bool(advanced_generation),
         "use_sampling": bool(gen_kwargs["do_sample"]),
         "temperature": float(gen_kwargs["temperature"]),
         "top_p": float(gen_kwargs["top_p"]),
@@ -258,12 +257,8 @@ def build_chat_messages(
 # ── Main tab entry point ───────────────────────────────────────────────────────
 
 
-def _render_generation_settings(context_key: str, remote: bool) -> tuple[dict, bool]:
-    """Render the Advanced generation settings expander.
-
-    Returns ``(gen_kwargs, advanced_generation)`` where ``advanced_generation``
-    is True when any generation setting differs from its default.
-    """
+def _render_generation_settings(context_key: str, remote: bool) -> dict:
+    """Render the Advanced generation settings expander and return generation kwargs."""
     with st.expander("Advanced", expanded=False):
         config_col1, config_col2 = st.columns([2, 1])
         with config_col1:
@@ -349,19 +344,9 @@ def _render_generation_settings(context_key: str, remote: bool) -> tuple[dict, b
         if remote:
             st.caption("Seed is local-only and disabled for remote runs.")
 
-    advanced_generation = (
-        max_new_tokens != _GEN_DEFAULTS["max_new_tokens"]
-        or use_sampling
-        or temperature != _GEN_DEFAULTS["temperature"]
-        or top_p != _GEN_DEFAULTS["top_p"]
-        or top_k != _GEN_DEFAULTS["top_k"]
-        or repetition_penalty != _GEN_DEFAULTS["repetition_penalty"]
-        or seed is not None
-    )
-
     do_sample = bool(use_sampling)
     generation_seed = seed if do_sample and seed is not None and not remote else None
-    gen_kwargs = {
+    return {
         "max_new_tokens": int(max_new_tokens),
         "do_sample": do_sample,
         "temperature": temperature,
@@ -370,7 +355,6 @@ def _render_generation_settings(context_key: str, remote: bool) -> tuple[dict, b
         "repetition_penalty": repetition_penalty,
         "seed": generation_seed,
     }
-    return gen_kwargs, advanced_generation
 
 
 def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
@@ -406,7 +390,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         st.info("Try a different dataset source or upload a non-empty personas file.")
         return
 
-    gen_kwargs, advanced_generation = _render_generation_settings(context_key, remote)
+    gen_kwargs = _render_generation_settings(context_key, remote)
 
     # ── Mode toggle ───────────────────────────────────────────────────────────
     compare_key = widget_key(context_key, "compare_mode")
@@ -431,7 +415,6 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
             dataset_source,
             personas,
             gen_kwargs,
-            advanced_generation,
         )
         return
 
@@ -513,7 +496,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
                     prompt_mode=prompt_mode,
                     system_prompt=active_system_prompt,
                     messages=chat_state["messages"],
-                    generation=generation_dict(gen_kwargs, advanced_generation),
+                    generation=generation_dict(gen_kwargs),
                 )
                 st.toast("Exported", icon=":material/check:")
         with rst_col:

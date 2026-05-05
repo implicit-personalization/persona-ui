@@ -1,3 +1,5 @@
+from typing import Any, NamedTuple
+
 import streamlit as st
 from nnterp import StandardizedTransformer
 from persona_data.synth_persona import PersonaData
@@ -19,22 +21,26 @@ from .chat import (
 )
 
 
-def _panel_state(panel_key: str) -> dict[str, object]:
-    """Get or initialise compare-panel chat state stored in session_state."""
-    if panel_key not in st.session_state:
-        st.session_state[panel_key] = default_chat_state()
-    return st.session_state[panel_key]
+class ComparePanel(NamedTuple):
+    side: str
+    state: dict[str, object]
+    log: Any
+    prompt: str | None
+    persona: PersonaData
+    prompt_key: str
+    edit_key: str
+    pending_key: str
 
 
-def _reset_compare_panel(
-    panel_state: dict,
-    edit_key: str,
-    persona_id: str,
-    prompt_mode: str,
-    *ui_keys: str,
-) -> None:
-    reset_chat_context_state(panel_state, persona_id, prompt_mode, *ui_keys)
-    st.session_state.pop(edit_key, None)
+def _reset_compare_panel(panel: ComparePanel) -> None:
+    reset_chat_context_state(
+        panel.state,
+        panel.persona.id,
+        panel.state["prompt_mode"],
+        panel.prompt_key,
+        panel.pending_key,
+    )
+    st.session_state.pop(panel.edit_key, None)
 
 
 def _generate_panel_reply(
@@ -61,7 +67,6 @@ def render_compare_mode(
     dataset_source: str,
     personas: list[PersonaData],
     gen_kwargs: dict,
-    advanced_generation: bool,
 ) -> None:
     """Render the full side-by-side comparison UI."""
     model: StandardizedTransformer | None = None
@@ -85,19 +90,15 @@ def render_compare_mode(
         ),
     )
 
-    left_col, right_col = st.columns(2)
-    left_panel_key = widget_key(context_key, "cmp_left")
-    right_panel_key = widget_key(context_key, "cmp_right")
-    left_prompt_key = widget_key(left_panel_key, "custom_prompt")
-    right_prompt_key = widget_key(right_panel_key, "custom_prompt")
-    left_edit_key = widget_key(left_panel_key, "edit_idx")
-    right_edit_key = widget_key(right_panel_key, "edit_idx")
-    left_pending_key = widget_key(left_panel_key, "pending_regen")
-    right_pending_key = widget_key(right_panel_key, "pending_regen")
-
-    def render_panel(side: str) -> tuple[dict, object, str | None, str, PersonaData]:
+    def render_panel(side: str) -> ComparePanel:
         panel_key = widget_key(context_key, f"cmp_{side}")
-        state = _panel_state(panel_key)
+        if panel_key not in st.session_state:
+            st.session_state[panel_key] = default_chat_state()
+        state = st.session_state[panel_key]
+
+        prompt_key = widget_key(panel_key, "custom_prompt")
+        edit_key = widget_key(panel_key, "edit_idx")
+        pending_key = widget_key(panel_key, "pending_regen")
 
         # Carry over persona / prompt selections across model or remote switches.
         persist_persona_key = f"chat:last_cmp_{side}_persona"
@@ -105,10 +106,6 @@ def render_compare_mode(
         if state["persona_id"] is None:
             state["persona_id"] = st.session_state.get(persist_persona_key)
             state["prompt_mode"] = st.session_state.get(persist_prompt_key, "templated")
-
-        prompt_key = widget_key(panel_key, "custom_prompt")
-        edit_key = widget_key(panel_key, "edit_idx")
-        pending_regen_key = widget_key(panel_key, "pending_regen")
 
         selected_persona, prompt_mode, changed = render_persona_prompt_controls(
             personas,
@@ -122,11 +119,7 @@ def render_compare_mode(
 
         if changed:
             reset_chat_context_state(
-                state,
-                selected_persona.id,
-                prompt_mode,
-                prompt_key,
-                pending_regen_key,
+                state, selected_persona.id, prompt_mode, prompt_key, pending_key
             )
             st.session_state.pop(edit_key, None)
 
@@ -137,83 +130,57 @@ def render_compare_mode(
         chat_log = st.container()
         with chat_log:
             active_system_prompt = render_system_prompt(
-                prompt_key,
-                prompt_mode,
-                active_system_prompt,
+                prompt_key, prompt_mode, active_system_prompt
             )
-        return (
-            state,
-            chat_log,
-            active_system_prompt,
-            pending_regen_key,
-            selected_persona,
+        return ComparePanel(
+            side=side,
+            state=state,
+            log=chat_log,
+            prompt=active_system_prompt,
+            persona=selected_persona,
+            prompt_key=prompt_key,
+            edit_key=edit_key,
+            pending_key=pending_key,
         )
 
+    left_col, right_col = st.columns(2)
     with left_col:
-        left_state, left_log, left_prompt, left_pending, left_persona = render_panel(
-            "left"
-        )
+        left = render_panel("left")
     with right_col:
-        right_state, right_log, right_prompt, right_pending, right_persona = (
-            render_panel("right")
-        )
-
-    panels = [
-        (
-            left_state,
-            left_log,
-            left_prompt,
-            left_pending,
-            left_edit_key,
-            left_persona,
-        ),
-        (
-            right_state,
-            right_log,
-            right_prompt,
-            right_pending,
-            right_edit_key,
-            right_persona,
-        ),
-    ]
+        right = render_panel("right")
+    panels: list[ComparePanel] = [left, right]
 
     # Handle per-panel regeneration triggered by message edits
-    regen_panels = [
-        (panel_state, panel_log, panel_prompt)
-        for panel_state, panel_log, panel_prompt, p_pending, _panel_edit_key, _ in panels
-        if st.session_state.pop(p_pending, False)
-    ]
+    regen_panels = [p for p in panels if st.session_state.pop(p.pending_key, False)]
     if regen_panels:
         model = _get_model()
 
         results: list[ChatReply | Exception] = []
         with st.spinner("Regenerating..."):
-            for panel_state, _panel_log, panel_prompt in regen_panels:
+            for panel in regen_panels:
                 try:
                     results.append(
                         _generate_panel_reply(
                             model=model,
                             remote=remote,
-                            panel_state=panel_state,
-                            panel_prompt=panel_prompt,
+                            panel_state=panel.state,
+                            panel_prompt=panel.prompt,
                             gen_kwargs=gen_kwargs,
                         )
                     )
                 except Exception as exc:
                     results.append(exc)
 
-        for (panel_state, panel_log, _panel_prompt), result in zip(
-            regen_panels, results
-        ):
+        for panel, result in zip(regen_panels, results):
             if isinstance(result, Exception):
-                with panel_log:
+                with panel.log:
                     st.error(f"Generation failed: {result}")
-                panel_state["messages"].pop()
+                panel.state["messages"].pop()
                 continue
-            panel_state["messages"].append(
+            panel.state["messages"].append(
                 {"role": "assistant", "content": result.text}
             )
-            panel_state["past_key_values"] = (
+            panel.state["past_key_values"] = (
                 result.past_key_values if not remote else None
             )
         st.rerun()
@@ -222,28 +189,28 @@ def render_compare_mode(
     if contrast_enabled:
         pending_edits: list[tuple[int, int]] = [
             (panel_idx, msg_idx)
-            for panel_idx, (panel_state, *_rest) in enumerate(panels)
-            for msg_idx, msg in enumerate(panel_state["messages"])
+            for panel_idx, panel in enumerate(panels)
+            for msg_idx, msg in enumerate(panel.state["messages"])
             if msg.get("_needs_contrast") and msg.get("role") == "assistant"
         ]
         if pending_edits:
             model = _get_model()
-            label_a = persona_label(left_persona)
-            label_b = persona_label(right_persona)
+            label_a = persona_label(left.persona)
+            label_b = persona_label(right.persona)
             with st.spinner("Recomputing token contrast…"):
                 for panel_idx, msg_idx in pending_edits:
-                    panel_state = panels[panel_idx][0]
-                    msg = panel_state["messages"][msg_idx]
-                    if msg_idx >= len(left_state["messages"]) or msg_idx >= len(
-                        right_state["messages"]
+                    panel = panels[panel_idx]
+                    msg = panel.state["messages"][msg_idx]
+                    if msg_idx >= len(left.state["messages"]) or msg_idx >= len(
+                        right.state["messages"]
                     ):
                         msg.pop("_needs_contrast", None)
                         continue
                     context_a = build_chat_messages(
-                        left_prompt, left_state["messages"][:msg_idx]
+                        left.prompt, left.state["messages"][:msg_idx]
                     )
                     context_b = build_chat_messages(
-                        right_prompt, right_state["messages"][:msg_idx]
+                        right.prompt, right.state["messages"][:msg_idx]
                     )
                     try:
                         response_ids = model.tokenizer(
@@ -267,20 +234,13 @@ def render_compare_mode(
                     msg.pop("_needs_contrast", None)
             st.rerun()
 
-    for (
-        panel_state,
-        panel_log,
-        _panel_prompt,
-        panel_pending,
-        panel_edit_key,
-        _,
-    ) in panels:
+    for panel in panels:
         render_chat_window(
-            chat_log=panel_log,
-            messages=panel_state["messages"],
-            chat_state=panel_state,
-            edit_key=panel_edit_key,
-            pending_key=panel_pending,
+            chat_log=panel.log,
+            messages=panel.state["messages"],
+            chat_state=panel.state,
+            edit_key=panel.edit_key,
+            pending_key=panel.pending_key,
             show_contrast=contrast_enabled,
             edit_column_ratio=(10, 1),
         )
@@ -298,20 +258,17 @@ def render_compare_mode(
                 key=widget_key(context_key, "cmp_export"),
                 help="Export both chats",
             ):
-                for side, panel_state, panel_prompt, panel_persona in (
-                    ("left", left_state, left_prompt, left_persona),
-                    ("right", right_state, right_prompt, right_persona),
-                ):
+                for panel in panels:
                     save_chat_export(
                         model_name=model_name,
                         dataset_source=dataset_source,
-                        persona_id=panel_persona.id,
-                        persona_name=getattr(panel_persona, "name", None),
-                        prompt_mode=panel_state["prompt_mode"],
-                        system_prompt=panel_prompt,
-                        messages=panel_state["messages"],
-                        generation=generation_dict(gen_kwargs, advanced_generation),
-                        panel_label=side,
+                        persona_id=panel.persona.id,
+                        persona_name=getattr(panel.persona, "name", None),
+                        prompt_mode=panel.state["prompt_mode"],
+                        system_prompt=panel.prompt,
+                        messages=panel.state["messages"],
+                        generation=generation_dict(gen_kwargs),
+                        panel_label=panel.side,
                     )
                 st.toast("Exported", icon=":material/check:")
         with rst_col:
@@ -326,55 +283,21 @@ def render_compare_mode(
                 help="Reset chat",
                 key=popover_key,
             ):
-                if st.button(
-                    "Reset left",
-                    key=widget_key(context_key, "cmp_reset_left"),
-                ):
-                    _reset_compare_panel(
-                        left_state,
-                        left_edit_key,
-                        left_persona.id,
-                        left_state["prompt_mode"],
-                        left_prompt_key,
-                        left_pending_key,
-                    )
-                    st.session_state[reset_menu_nonce_key] += 1
-                    st.rerun()
-                if st.button(
-                    "Reset right",
-                    key=widget_key(context_key, "cmp_reset_right"),
-                ):
-                    _reset_compare_panel(
-                        right_state,
-                        right_edit_key,
-                        right_persona.id,
-                        right_state["prompt_mode"],
-                        right_prompt_key,
-                        right_pending_key,
-                    )
-                    st.session_state[reset_menu_nonce_key] += 1
-                    st.rerun()
+                for panel in panels:
+                    if st.button(
+                        f"Reset {panel.side}",
+                        key=widget_key(context_key, f"cmp_reset_{panel.side}"),
+                    ):
+                        _reset_compare_panel(panel)
+                        st.session_state[reset_menu_nonce_key] += 1
+                        st.rerun()
                 if st.button(
                     "Reset both",
                     key=widget_key(context_key, "cmp_reset_both"),
                     type="primary",
                 ):
-                    _reset_compare_panel(
-                        left_state,
-                        left_edit_key,
-                        left_persona.id,
-                        left_state["prompt_mode"],
-                        left_prompt_key,
-                        left_pending_key,
-                    )
-                    _reset_compare_panel(
-                        right_state,
-                        right_edit_key,
-                        right_persona.id,
-                        right_state["prompt_mode"],
-                        right_prompt_key,
-                        right_pending_key,
-                    )
+                    for panel in panels:
+                        _reset_compare_panel(panel)
                     st.session_state[reset_menu_nonce_key] += 1
                     st.rerun()
 
@@ -388,36 +311,27 @@ def render_compare_mode(
 
     model = cached_model(model_name=model_name, remote=remote)
 
-    for panel_state, panel_log, _panel_prompt, _p_pending, _panel_edit_key, _ in panels:
-        panel_state["messages"].append({"role": "user", "content": user_prompt})
-        with panel_log:
+    for panel in panels:
+        panel.state["messages"].append({"role": "user", "content": user_prompt})
+        with panel.log:
             render_chat_message({"role": "user", "content": user_prompt})
 
     # Snapshot contexts before the new assistant turn is appended (needed for contrast).
     pre_gen_contexts = [
-        build_chat_messages(panel_prompt, panel_state["messages"])
-        for panel_state, _panel_log, panel_prompt, _p_pending, _panel_edit_key, _ in panels
+        build_chat_messages(panel.prompt, panel.state["messages"]) for panel in panels
     ]
 
     results: list[ChatReply | Exception] = []
     with st.spinner("Generating..."):
-        # Keep compare-mode generation sequential so both panels use the same
-        # model/session state safely.
-        for (
-            panel_state,
-            _panel_log,
-            panel_prompt,
-            _p_pending,
-            _panel_edit_key,
-            _,
-        ) in panels:
+        # Sequential generation keeps both panels using model/session state safely.
+        for panel in panels:
             try:
                 results.append(
                     _generate_panel_reply(
                         model=model,
                         remote=remote,
-                        panel_state=panel_state,
-                        panel_prompt=panel_prompt,
+                        panel_state=panel.state,
+                        panel_prompt=panel.prompt,
                         gen_kwargs=gen_kwargs,
                     )
                 )
@@ -425,23 +339,16 @@ def render_compare_mode(
                 results.append(exc)
 
     valid_results: list[ChatReply | None] = []
-    for (
-        panel_state,
-        panel_log,
-        _panel_prompt,
-        _p_pending,
-        _panel_edit_key,
-        _,
-    ), result in zip(panels, results):
+    for panel, result in zip(panels, results):
         if isinstance(result, Exception):
-            with panel_log:
+            with panel.log:
                 st.error(f"Generation failed: {result}")
-            panel_state["messages"].pop()
+            panel.state["messages"].pop()
             valid_results.append(None)
             continue
 
-        panel_state["messages"].append({"role": "assistant", "content": result.text})
-        panel_state["past_key_values"] = result.past_key_values if not remote else None
+        panel.state["messages"].append({"role": "assistant", "content": result.text})
+        panel.state["past_key_values"] = result.past_key_values if not remote else None
         valid_results.append(result)
 
     # Compute contrastive token coloring when both panels succeeded.
@@ -458,14 +365,14 @@ def render_compare_mode(
                     context_b=pre_gen_contexts[1],
                     response_ids_a=valid_results[0].generated_ids,
                     response_ids_b=valid_results[1].generated_ids,
-                    label_a=persona_label(left_persona),
-                    label_b=persona_label(right_persona),
+                    label_a=persona_label(left.persona),
+                    label_b=persona_label(right.persona),
                     remote=remote,
                 )
                 if tc_a is not None:
-                    left_state["messages"][-1]["_contrast"] = tc_a
+                    left.state["messages"][-1]["_contrast"] = tc_a
                 if tc_b is not None:
-                    right_state["messages"][-1]["_contrast"] = tc_b
+                    right.state["messages"][-1]["_contrast"] = tc_b
             except Exception as exc:
                 st.warning(f"Token contrast failed: {exc}")
 

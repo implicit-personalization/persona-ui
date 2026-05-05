@@ -124,18 +124,17 @@ def _render_mask_strategy_select(scope: str) -> MaskStrategy:
         MaskStrategy.ANSWER_MEAN.value,
     )
     strategies = list(MaskStrategy)
-    default_index = next(
-        (
-            idx
-            for idx, strategy in enumerate(strategies)
-            if strategy.value == last_strategy
-        ),
-        0,
-    )
     selected = st.selectbox(
         "Mask strategy",
         options=strategies,
-        index=default_index,
+        index=next(
+            (
+                idx
+                for idx, strategy in enumerate(strategies)
+                if strategy.value == last_strategy
+            ),
+            0,
+        ),
         format_func=lambda strategy: strategy.value.replace("_", " ").title(),
         key=widget_key("load", "mask_strategy", scope),
         help="Which extracted activation artifact set to load.",

@@ -32,11 +32,18 @@ _LAST_VARIANTS_KEY = "extract:last_variants"
 _LAST_BASELINE_KEY = "extract:last_include_baseline"
 _LAST_PERSONA_IDS_KEY = "extract:last_persona_ids"
 _LAST_QA_TYPE_KEY = "extract:last_qa_type"
-_LAST_DIFFICULTY_KEY = "extract:last_difficulty"
+_LAST_ITEM_TYPE_KEY = "extract:last_item_type"
+_LAST_SCOPE_KEY = "extract:last_scope"
 _LAST_MAX_QUESTIONS_KEY = "extract:last_max_questions"
 _LAST_MASK_STRATEGY_KEY = "extract:last_mask_strategy"
 
 _QA_TYPE_OPTIONS = ["all", "explicit", "implicit"]
+_ITEM_TYPE_OPTIONS = ["all", "mcq", "frq"]
+_SCOPE_OPTIONS = ["all", "individual", "shared"]
+
+
+def _option_index(options: list[str], value: str) -> int:
+    return options.index(value) if value in options else 0
 
 
 def _build_run_plan(
@@ -106,31 +113,25 @@ def _render_sample_tokens_html(p, tokenizer, *, max_tokens: int = 200) -> str:
     )
 
 
-def _render_local_dataset_uploads() -> None:
-    """Render file inputs for local dataset uploads."""
-
-    with st.expander("Local dataset upload", expanded=True):
-        st.file_uploader(
-            "personas.jsonl",
-            type=["jsonl"],
-            key="extract__personas_file",
-            help="Expected fields: id, persona, templated_view, biography_view",
-        )
-        st.file_uploader(
-            "qa.jsonl",
-            type=["jsonl"],
-            key="extract__qa_file",
-            help="Expected fields: id, qid, type, question, answer, difficulty",
-        )
-
-
 def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     """Render the extraction tab."""
 
     st.title("Extract")
 
     if dataset_source == "Local JSONL upload":
-        _render_local_dataset_uploads()
+        with st.expander("Local dataset upload", expanded=True):
+            st.file_uploader(
+                "personas.jsonl",
+                type=["jsonl"],
+                key="extract__personas_file",
+                help="Expected fields: id, persona, templated_view, biography_view",
+            )
+            st.file_uploader(
+                "qa.jsonl",
+                type=["jsonl"],
+                key="extract__qa_file",
+                help="Expected fields: id, qid, type, item_type, scope, question, answer",
+            )
 
     last_variants = st.session_state.get(
         _LAST_VARIANTS_KEY, [*PERSONA_VARIANTS, BASELINE_PERSONA_ID]
@@ -146,12 +147,12 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         key=_extract_widget_key(model_name, remote, dataset_source, "persona_variants"),
         help="Extract these variants for each selected persona.",
     )
-    include_baseline_default = st.session_state.get(
-        _LAST_BASELINE_KEY, BASELINE_PERSONA_ID in last_variants
-    )
     include_baseline = st.checkbox(
         "Extract Assistant baseline",
-        value=include_baseline_default,
+        value=st.session_state.get(
+            _LAST_BASELINE_KEY,
+            BASELINE_PERSONA_ID in last_variants,
+        ),
         key=_extract_widget_key(model_name, remote, dataset_source, "baseline"),
         help=(
             "Extracts the persona-less Assistant prompt once using the first "
@@ -214,18 +215,15 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
     with st.expander("Advanced", expanded=False):
         st.caption("Filters")
 
-        col1, col2, _ = st.columns([2, 2, 1])
+        col1, col2, col3 = st.columns(3)
         with col1:
-            last_qa_type = st.session_state.get(_LAST_QA_TYPE_KEY, "all")
-            qa_type_index = (
-                _QA_TYPE_OPTIONS.index(last_qa_type)
-                if last_qa_type in _QA_TYPE_OPTIONS
-                else 0
-            )
             qa_type_select = st.selectbox(
                 "QA type",
                 options=_QA_TYPE_OPTIONS,
-                index=qa_type_index,
+                index=_option_index(
+                    _QA_TYPE_OPTIONS,
+                    st.session_state.get(_LAST_QA_TYPE_KEY, "all"),
+                ),
                 key=_extract_widget_key(
                     model_name, remote, dataset_source, "qa_type_select"
                 ),
@@ -237,39 +235,68 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
                 else None
             )
         with col2:
-            last_difficulty = st.session_state.get(_LAST_DIFFICULTY_KEY, [1, 2, 3])
-            default_difficulty = [d for d in last_difficulty if d in (1, 2, 3)] or [
-                1,
-                2,
-                3,
-            ]
-            difficulty_values = st.multiselect(
-                "Difficulty",
-                options=[1, 2, 3],
-                default=default_difficulty,
+            item_type_select = st.selectbox(
+                "Item type",
+                options=_ITEM_TYPE_OPTIONS,
+                index=_option_index(
+                    _ITEM_TYPE_OPTIONS,
+                    st.session_state.get(_LAST_ITEM_TYPE_KEY, "all"),
+                ),
                 key=_extract_widget_key(
-                    model_name, remote, dataset_source, "difficulty_select"
+                    model_name, remote, dataset_source, "item_type_select"
                 ),
             )
-            st.session_state[_LAST_DIFFICULTY_KEY] = difficulty_values
-            qa_filter_difficulty = difficulty_values if difficulty_values else None
+            st.session_state[_LAST_ITEM_TYPE_KEY] = item_type_select
+            qa_filter_item_type: Literal["mcq", "frq"] | None = (
+                cast(Literal["mcq", "frq"], item_type_select)
+                if item_type_select in ("mcq", "frq")
+                else None
+            )
+        with col3:
+            scope_select = st.selectbox(
+                "Scope",
+                options=_SCOPE_OPTIONS,
+                index=_option_index(
+                    _SCOPE_OPTIONS,
+                    st.session_state.get(_LAST_SCOPE_KEY, "all"),
+                ),
+                key=_extract_widget_key(
+                    model_name,
+                    remote,
+                    dataset_source,
+                    "scope_select",
+                ),
+            )
+            st.session_state[_LAST_SCOPE_KEY] = scope_select
+            qa_filter_scope: Literal["individual", "shared"] | None = (
+                cast(Literal["individual", "shared"], scope_select)
+                if scope_select in ("individual", "shared")
+                else None
+            )
 
         st.caption("Extraction settings")
         last_strategy = st.session_state.get(
-            _LAST_MASK_STRATEGY_KEY, MaskStrategy.ANSWER_MEAN.value
+            _LAST_MASK_STRATEGY_KEY,
+            MaskStrategy.ANSWER_MEAN.value,
         )
         strategy_options = list(MaskStrategy)
-        strategy_index = next(
-            (i for i, s in enumerate(strategy_options) if s.value == last_strategy),
-            0,
-        )
         mask_strategy = st.selectbox(
             "Mask strategy",
             options=strategy_options,
-            index=strategy_index,
+            index=next(
+                (
+                    idx
+                    for idx, strategy in enumerate(strategy_options)
+                    if strategy.value == last_strategy
+                ),
+                0,
+            ),
             format_func=lambda s: s.value.replace("_", " ").title(),
             key=_extract_widget_key(
-                model_name, remote, dataset_source, "mask_strategy"
+                model_name,
+                remote,
+                dataset_source,
+                "mask_strategy",
             ),
             help="Which tokens contribute to the averaged hidden state.",
         )
@@ -279,7 +306,10 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         for persona in selected_personas:
             qa = list(
                 dataset.get_qa(
-                    persona.id, type=qa_filter_type, difficulty=qa_filter_difficulty
+                    persona.id,
+                    type=qa_filter_type,
+                    item_type=qa_filter_item_type,
+                    scope=qa_filter_scope,
                 )
             )
             if qa:
@@ -295,13 +325,14 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
             return
 
         max_q = min(len(qa_pairs) for _, qa_pairs in runs)
-        last_max = st.session_state.get(_LAST_MAX_QUESTIONS_KEY, max_q)
-        default_max = min(max(last_max, 1), max_q)
         max_questions = st.slider(
             "Max questions",
             min_value=1,
             max_value=max_q,
-            value=default_max,
+            value=min(
+                max(st.session_state.get(_LAST_MAX_QUESTIONS_KEY, max_q), 1),
+                max_q,
+            ),
             key=_extract_widget_key(
                 model_name, remote, dataset_source, "max_questions"
             ),
