@@ -122,11 +122,11 @@ The Compare and Extract tabs read from / write to:
 
 ```
 artifacts/
-├── activations/<model_dir>/<prompt_variant>/<persona_id>/
-│   ├── activations.safetensors
-│   └── metadata.json   # used for persona names and layer counts
+├── activations/<model_dir>/<mask_strategy>/<prompt_variant>/
+│   ├── manifest.json
+│   └── <persona_id>.safetensors
 └── chats/<model_dir>/<persona_id>/
     └── <export>.json
 ```
 
-`<model_dir>` is the model name with `/` replaced by `__` (e.g. `google__gemma-2-9b-it`). Chat exports still store `dataset_source` in the JSON payload.
+`<model_dir>` is the model name with `/` replaced by `__` (e.g. `google__gemma-2-9b-it`). The manifest stores persona names, tensor shape metadata, and sample ids. Chat exports still store `dataset_source` in the JSON payload.

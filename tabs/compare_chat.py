@@ -5,14 +5,19 @@ from nnterp import StandardizedTransformer
 from persona_data.synth_persona import PersonaData
 
 from state import default_chat_state, reset_chat_context_state
-from utils.chat import ChatReply, generate_chat_reply, resolve_system_prompt
+from utils.chat import (
+    ChatReply,
+    build_chat_messages,
+    generate_chat_reply,
+    resolve_system_prompt,
+)
 from utils.chat_export import save_chat_export
 from utils.contrast import compute_contrast, compute_contrast_pair
 from utils.helpers import persona_label, widget_key
 from utils.runtime import cached_model
 
-from .chat import (
-    build_chat_messages,
+from .chat_ui import (
+    GenerationConfig,
     generation_dict,
     render_chat_message,
     render_chat_window,
@@ -49,14 +54,14 @@ def _generate_panel_reply(
     remote: bool,
     panel_state: dict[str, object],
     panel_prompt: str | None,
-    gen_kwargs: dict,
+    generation: GenerationConfig,
 ) -> ChatReply:
     return generate_chat_reply(
         model=model,
         messages=build_chat_messages(panel_prompt, panel_state["messages"]),
         remote=remote,
         past_key_values=panel_state["past_key_values"],
-        **gen_kwargs,
+        **generation.to_generate_kwargs(),
     )
 
 
@@ -66,7 +71,7 @@ def render_compare_mode(
     context_key: str,
     dataset_source: str,
     personas: list[PersonaData],
-    gen_kwargs: dict,
+    generation: GenerationConfig,
 ) -> None:
     """Render the full side-by-side comparison UI."""
     model: StandardizedTransformer | None = None
@@ -85,8 +90,7 @@ def render_compare_mode(
         help=(
             "Color each generated token by how characteristic it is of each persona. "
             "Red = more likely under the left persona, blue = more likely under the right. "
-            "Requires four extra forward passes after each turn (batched into one "
-            "remote session when running on NDIF)."
+            "Requires up to four extra scoring passes after each turn."
         ),
     )
 
@@ -165,7 +169,7 @@ def render_compare_mode(
                             remote=remote,
                             panel_state=panel.state,
                             panel_prompt=panel.prompt,
-                            gen_kwargs=gen_kwargs,
+                            generation=generation,
                         )
                     )
                 except Exception as exc:
@@ -175,7 +179,6 @@ def render_compare_mode(
             if isinstance(result, Exception):
                 with panel.log:
                     st.error(f"Generation failed: {result}")
-                panel.state["messages"].pop()
                 continue
             panel.state["messages"].append(
                 {"role": "assistant", "content": result.text}
@@ -267,7 +270,7 @@ def render_compare_mode(
                         prompt_mode=panel.state["prompt_mode"],
                         system_prompt=panel.prompt,
                         messages=panel.state["messages"],
-                        generation=generation_dict(gen_kwargs),
+                        generation=generation_dict(generation),
                         panel_label=panel.side,
                     )
                 st.toast("Exported", icon=":material/check:")
@@ -332,7 +335,7 @@ def render_compare_mode(
                         remote=remote,
                         panel_state=panel.state,
                         panel_prompt=panel.prompt,
-                        gen_kwargs=gen_kwargs,
+                        generation=generation,
                     )
                 )
             except Exception as exc:

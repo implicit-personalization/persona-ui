@@ -11,11 +11,12 @@ VARIANT_LABELS = {
     "custom": "Custom",
 }
 
-# For selectbox options: list of labels in definition order
-MODE_LABELS = list(VARIANT_LABELS.values())
+CHAT_PROMPT_MODES = ("empty", "templated", "biography", "custom")
+CHAT_PROMPT_MODE_LABELS = [VARIANT_LABELS[key] for key in CHAT_PROMPT_MODES]
+CHAT_PROMPT_MODE_LABEL_TO_KEY = {
+    VARIANT_LABELS[key]: key for key in CHAT_PROMPT_MODES
+}
 
-# Reverse lookup: label -> key
-MODE_LABEL_TO_KEY = {v: k for k, v in VARIANT_LABELS.items()}
 
 DATASET_SOURCES = [
     "HuggingFace: synth-persona",

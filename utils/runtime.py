@@ -67,16 +67,27 @@ def list_remote_models() -> list[str]:
 
 
 @st.cache_resource(show_spinner=False, max_entries=1)
-def cached_model(model_name: str, remote: bool):
+def _cached_model_by_name(model_name: str):
     """Load and cache a standardized nnterp model.
 
     Streamlit reruns this app on every interaction, so caching keeps one loaded
-    model instance per ``(model_name, remote)`` instead of reloading weights on
-    every widget change.
+    model instance per model name instead of reloading weights on every widget
+    change.
     """
 
     from nnterp import StandardizedTransformer
 
-    # HACK: For now do it like this because of the bug.
+    # The remote constructor path is currently unstable for this model wrapper.
     # return StandardizedTransformer(model_name, remote=remote, check_renaming=False)
     return StandardizedTransformer(model_name)
+
+
+def cached_model(model_name: str, remote: bool):
+    """Return the cached model for ``model_name``.
+
+    ``remote`` still matters at generation/trace time, but the current
+    ``StandardizedTransformer`` constructor ignores it. Keeping it out of the
+    cache key avoids loading duplicate local model objects when toggling NDIF.
+    """
+
+    return _cached_model_by_name(model_name)

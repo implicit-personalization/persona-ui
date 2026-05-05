@@ -183,6 +183,7 @@ def _render_cosine_similarity(
     )
     if not persona_ids:
         return
+    persona_key = "_".join(sorted(persona_ids))
 
     cosine_fig_key = widget_key(
         "load",
@@ -191,6 +192,7 @@ def _render_cosine_similarity(
         mask_strategy.value,
         variant_a,
         variant_b,
+        persona_key,
     )
     filename = _filename(
         "compare",
@@ -208,7 +210,19 @@ def _render_cosine_similarity(
         "_".join(variants),
     )
 
-    if st.button("Compare vectors", type="primary"):
+    if st.button(
+        "Compare vectors",
+        type="primary",
+        key=widget_key(
+            "load",
+            "compare_vectors",
+            store.model_name,
+            mask_strategy.value,
+            variant_a,
+            variant_b,
+            persona_key,
+        ),
+    ):
         try:
             variant_samples = load_variant_mean_samples(
                 store,

@@ -1,12 +1,14 @@
+import logging
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Literal
 
 import torch
 from nnterp import StandardizedTransformer
-from persona_data.prompts import format_messages, format_prompt
+from persona_data.prompts import format_messages, format_prompt, normalize_messages
 from persona_data.synth_persona import PersonaData
 
+logger = logging.getLogger(__name__)
 SystemPromptMode = Literal["empty", "templated", "biography", "custom"]
 
 
@@ -15,6 +17,17 @@ class ChatReply:
     text: str
     past_key_values: object | None
     generated_ids: torch.Tensor | None = None
+
+
+def build_chat_messages(
+    system_prompt: str | None,
+    messages: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Prepend the active system prompt to a chat history when present."""
+
+    return (
+        [{"role": "system", "content": system_prompt}] if system_prompt else []
+    ) + messages
 
 
 def resolve_system_prompt(
@@ -38,6 +51,83 @@ def resolve_system_prompt(
     if mode in ("templated", "biography"):
         return format_prompt(persona, mode, mode="conversational")
     raise ValueError(f"Unsupported system prompt mode: {mode}")
+
+
+def _format_plain_messages(
+    messages: list[dict[str, str]],
+    *,
+    add_generation_prompt: bool,
+) -> str:
+    """Format messages as plain text when no tokenizer chat template is usable."""
+
+    lines: list[str] = []
+    for message in messages:
+        role = message["role"]
+        content = message["content"]
+        if role == "system":
+            if content:
+                lines.append(f"System: {content}")
+        elif role == "user":
+            lines.append(f"User: {content}")
+        elif role == "assistant":
+            lines.append(f"Assistant: {content}")
+        else:
+            lines.append(f"{role.title()}: {content}")
+
+    if add_generation_prompt and (
+        not lines or not lines[-1].startswith("Assistant:")
+    ):
+        lines.append("Assistant:")
+
+    return "\n\n".join(lines)
+
+
+def format_generation_prompt(
+    messages: list[dict[str, str]],
+    tokenizer: object,
+    *,
+    add_generation_prompt: bool = True,
+) -> tuple[str, int]:
+    """Render chat messages and count prompt tokens.
+
+    ``persona-data`` owns the standard chat-template path. The fallback below is
+    only for tokenizers with broken or missing chat templates.
+    """
+
+    try:
+        prompt, prompt_token_count = format_messages(
+            messages,
+            tokenizer,
+            add_generation_prompt=add_generation_prompt,
+        )
+        return prompt, prompt_token_count
+    except Exception:
+        logger.debug("persona-data format_messages failed", exc_info=True)
+
+    try:
+        prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+        )
+    except Exception:
+        logger.debug("Chat template failed on raw messages", exc_info=True)
+        normalized = normalize_messages(messages)
+        try:
+            prompt = tokenizer.apply_chat_template(
+                normalized,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+            )
+        except Exception:
+            logger.debug("Chat template fallback failed", exc_info=True)
+            prompt = _format_plain_messages(
+                normalized,
+                add_generation_prompt=add_generation_prompt,
+            )
+
+    prompt_token_count = tokenizer(prompt, return_tensors="pt").input_ids.shape[1]
+    return prompt, prompt_token_count
 
 
 @contextmanager
@@ -96,9 +186,7 @@ def generate_chat_reply(
     """
 
     tokenizer = model.tokenizer
-    prompt, prompt_token_count = format_messages(
-        messages, tokenizer, add_generation_prompt=True
-    )
+    prompt, prompt_token_count = format_generation_prompt(messages, tokenizer)
 
     generation_kwargs: dict[str, object] = {
         "max_new_tokens": max_new_tokens,

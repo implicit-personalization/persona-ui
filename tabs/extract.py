@@ -46,6 +46,23 @@ def _option_index(options: list[str], value: str) -> int:
     return options.index(value) if value in options else 0
 
 
+def _remembered_select(
+    label: str,
+    options: list[str],
+    state_key: str,
+    key: str,
+    default: str = "all",
+) -> str:
+    selected = st.selectbox(
+        label,
+        options=options,
+        index=_option_index(options, st.session_state.get(state_key, default)),
+        key=key,
+    )
+    st.session_state[state_key] = selected
+    return selected
+
+
 def _build_run_plan(
     selected_variants: list[str],
     runs: list[tuple[PersonaData, list[QAPair]]],
@@ -217,49 +234,38 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            qa_type_select = st.selectbox(
+            qa_type_select = _remembered_select(
                 "QA type",
-                options=_QA_TYPE_OPTIONS,
-                index=_option_index(
-                    _QA_TYPE_OPTIONS,
-                    st.session_state.get(_LAST_QA_TYPE_KEY, "all"),
-                ),
+                _QA_TYPE_OPTIONS,
+                _LAST_QA_TYPE_KEY,
                 key=_extract_widget_key(
                     model_name, remote, dataset_source, "qa_type_select"
                 ),
             )
-            st.session_state[_LAST_QA_TYPE_KEY] = qa_type_select
             qa_filter_type: Literal["explicit", "implicit"] | None = (
                 cast(Literal["explicit", "implicit"], qa_type_select)
                 if qa_type_select in ("explicit", "implicit")
                 else None
             )
         with col2:
-            item_type_select = st.selectbox(
+            item_type_select = _remembered_select(
                 "Item type",
-                options=_ITEM_TYPE_OPTIONS,
-                index=_option_index(
-                    _ITEM_TYPE_OPTIONS,
-                    st.session_state.get(_LAST_ITEM_TYPE_KEY, "all"),
-                ),
+                _ITEM_TYPE_OPTIONS,
+                _LAST_ITEM_TYPE_KEY,
                 key=_extract_widget_key(
                     model_name, remote, dataset_source, "item_type_select"
                 ),
             )
-            st.session_state[_LAST_ITEM_TYPE_KEY] = item_type_select
             qa_filter_item_type: Literal["mcq", "frq"] | None = (
                 cast(Literal["mcq", "frq"], item_type_select)
                 if item_type_select in ("mcq", "frq")
                 else None
             )
         with col3:
-            scope_select = st.selectbox(
+            scope_select = _remembered_select(
                 "Scope",
-                options=_SCOPE_OPTIONS,
-                index=_option_index(
-                    _SCOPE_OPTIONS,
-                    st.session_state.get(_LAST_SCOPE_KEY, "all"),
-                ),
+                _SCOPE_OPTIONS,
+                _LAST_SCOPE_KEY,
                 key=_extract_widget_key(
                     model_name,
                     remote,
@@ -267,7 +273,6 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
                     "scope_select",
                 ),
             )
-            st.session_state[_LAST_SCOPE_KEY] = scope_select
             qa_filter_scope: Literal["individual", "shared"] | None = (
                 cast(Literal["individual", "shared"], scope_select)
                 if scope_select in ("individual", "shared")
