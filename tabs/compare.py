@@ -1,8 +1,9 @@
+from collections.abc import Callable
 from itertools import combinations
+from dataclasses import dataclass
 
 import streamlit as st
 from persona_data.environment import get_artifacts_dir
-from persona_data.prompts import BASELINE_PERSONA_ID
 from persona_vectors.analysis import (
     load_persona_mean_samples,
     load_variant_mean_samples,
@@ -39,6 +40,15 @@ _list_layers_cached = st.cache_data(show_spinner=False)(list_available_layers)
 _LAST_COSINE_PERSONAS_KEY = "compare:last_personas:cosine"
 _LAST_PROJECTION_PERSONAS_KEY = "compare:last_personas:projection"
 _LAST_MASK_STRATEGY_KEY = "compare:last_mask_strategy"
+
+
+@dataclass(frozen=True)
+class CosineSelection:
+    variants: list[str]
+    variant_a: str
+    variant_b: str
+    persona_ids: list[str]
+    persona_key: str
 
 
 def _select_artifact_personas(
@@ -143,71 +153,157 @@ def _render_mask_strategy_select(scope: str) -> MaskStrategy:
     return selected
 
 
+def _render_cosine_selection(
+    store: ActivationStore,
+    mask_strategy: MaskStrategy,
+) -> CosineSelection | None:
+    variants = list(store.variants)
+    if len(variants) < 2:
+        st.info("Need at least two non-baseline variants for cosine comparison.")
+        return None
+
+    with st.expander("Vector selection", expanded=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            variant_a = st.selectbox(
+                "Variant A",
+                options=variants,
+                index=0,
+                format_func=prompt_variant_label,
+                key=widget_key("load", "variant_a"),
+            )
+        with col2:
+            variant_b = st.selectbox(
+                "Variant B",
+                options=variants,
+                index=min(1, len(variants) - 1),
+                format_func=prompt_variant_label,
+                key=widget_key("load", "variant_b"),
+            )
+
+        if variant_a == variant_b:
+            st.warning("Choose two different variants to compare.")
+            return None
+
+        persona_ids, _ = _select_artifact_personas(
+            store,
+            [variant_a, variant_b],
+            mask_strategy,
+            widget_scope="cosine",
+            remember_key=_LAST_COSINE_PERSONAS_KEY,
+        )
+    if not persona_ids:
+        return None
+    return CosineSelection(
+        variants=variants,
+        variant_a=variant_a,
+        variant_b=variant_b,
+        persona_ids=persona_ids,
+        persona_key="_".join(sorted(persona_ids)),
+    )
+
+
+def _build_cosine_figures(
+    store: ActivationStore,
+    selection: CosineSelection,
+) -> tuple[object, object | None, int, int] | None:
+    try:
+        variant_samples = load_variant_mean_samples(
+            store,
+            [selection.variant_a, selection.variant_b],
+            persona_ids=selection.persona_ids,
+        )
+    except Exception as exc:
+        st.error(f"Could not load vectors: {exc}")
+        return None
+
+    labels = variant_samples[selection.variant_a].labels
+    display_traces = [
+        (
+            label,
+            variant_samples[selection.variant_a].vectors[index],
+            variant_samples[selection.variant_b].vectors[index],
+        )
+        for index, label in enumerate(labels)
+    ]
+    fig = plot_layer_similarity(
+        display_traces,
+        title=(
+            f"{prompt_variant_label(selection.variant_a)} vs "
+            f"{prompt_variant_label(selection.variant_b)}"
+        ),
+        show=False,
+    )
+
+    pair_traces = []
+    pair_errors = []
+    for left, right in combinations(selection.variants, 2):
+        try:
+            pair_samples = (
+                variant_samples
+                if {left, right} == {selection.variant_a, selection.variant_b}
+                else load_variant_mean_samples(
+                    store,
+                    [left, right],
+                    persona_ids=selection.persona_ids,
+                )
+            )
+            pair_traces.append(
+                (
+                    f"{prompt_variant_label(left)} vs {prompt_variant_label(right)}",
+                    pair_samples[left].vectors.mean(dim=0),
+                    pair_samples[right].vectors.mean(dim=0),
+                )
+            )
+        except Exception as exc:
+            pair_errors.append(f"{left} vs {right}: {exc}")
+            continue
+
+    for err in pair_errors:
+        st.warning(f"Skipped pair trace: `{err}`")
+    pair_fig = (
+        plot_layer_similarity(
+            pair_traces,
+            title="Variant-pair cosine similarity averaged over selected personas",
+            show=False,
+        )
+        if pair_traces
+        else None
+    )
+    return fig, pair_fig, len(display_traces), len(pair_traces)
+
+
 def _render_cosine_similarity(
     store: ActivationStore,
     mask_strategy: MaskStrategy,
 ) -> None:
-    variants = list(store.variants)
-    if len(variants) < 2:
-        st.info("Need at least two non-baseline variants for cosine comparison.")
+    selection = _render_cosine_selection(store, mask_strategy)
+    if selection is None:
         return
-
-    col1, col2 = st.columns(2)
-    with col1:
-        variant_a = st.selectbox(
-            "Variant A",
-            options=variants,
-            index=0,
-            format_func=prompt_variant_label,
-            key=widget_key("load", "variant_a"),
-        )
-    with col2:
-        variant_b = st.selectbox(
-            "Variant B",
-            options=variants,
-            index=min(1, len(variants) - 1),
-            format_func=prompt_variant_label,
-            key=widget_key("load", "variant_b"),
-        )
-
-    if variant_a == variant_b:
-        st.warning("Choose two different variants to compare.")
-        return
-
-    persona_ids, _ = _select_artifact_personas(
-        store,
-        [variant_a, variant_b],
-        mask_strategy,
-        widget_scope="cosine",
-        remember_key=_LAST_COSINE_PERSONAS_KEY,
-    )
-    if not persona_ids:
-        return
-    persona_key = "_".join(sorted(persona_ids))
 
     cosine_fig_key = widget_key(
         "load",
         "cosine_fig_state",
         store.model_name,
         mask_strategy.value,
-        variant_a,
-        variant_b,
-        persona_key,
+        selection.variant_a,
+        selection.variant_b,
+        selection.persona_key,
     )
     filename = _filename(
         "compare",
         "cosine",
         store.model_name,
         mask_strategy.value,
-        variant_a,
-        variant_b,
+        selection.variant_a,
+        selection.variant_b,
     )
     pairs_filename = _filename(
         "compare",
         "cosine_pairs",
         store.model_name,
         mask_strategy.value,
-        "_".join(variants),
+        "_".join(selection.variants),
     )
 
     if st.button(
@@ -218,79 +314,16 @@ def _render_cosine_similarity(
             "compare_vectors",
             store.model_name,
             mask_strategy.value,
-            variant_a,
-            variant_b,
-            persona_key,
+            selection.variant_a,
+            selection.variant_b,
+            selection.persona_key,
         ),
     ):
-        try:
-            variant_samples = load_variant_mean_samples(
-                store,
-                [variant_a, variant_b],
-                persona_ids=persona_ids,
-            )
-        except Exception as exc:
-            st.error(f"Could not load vectors: {exc}")
+        figures = _build_cosine_figures(store, selection)
+        if figures is None:
             st.session_state.pop(cosine_fig_key, None)
             return
-
-        labels = variant_samples[variant_a].labels
-        display_traces = [
-            (
-                label,
-                variant_samples[variant_a].vectors[index],
-                variant_samples[variant_b].vectors[index],
-            )
-            for index, label in enumerate(labels)
-        ]
-        fig = plot_layer_similarity(
-            display_traces,
-            title=f"{prompt_variant_label(variant_a)} vs {prompt_variant_label(variant_b)}",
-            show=False,
-        )
-
-        pair_traces = []
-        pair_errors = []
-        for left, right in combinations(variants, 2):
-            try:
-                pair_samples = (
-                    variant_samples
-                    if {left, right} == {variant_a, variant_b}
-                    else load_variant_mean_samples(
-                        store,
-                        [left, right],
-                        persona_ids=persona_ids,
-                    )
-                )
-            except Exception as exc:
-                pair_errors.append(f"{left} vs {right}: {exc}")
-                continue
-            pair_traces.append(
-                (
-                    f"{prompt_variant_label(left)} vs {prompt_variant_label(right)}",
-                    pair_samples[left].vectors.mean(dim=0),
-                    pair_samples[right].vectors.mean(dim=0),
-                )
-            )
-
-        if pair_errors:
-            for err in pair_errors:
-                st.warning(f"Skipped pair trace: `{err}`")
-        pair_fig = (
-            plot_layer_similarity(
-                pair_traces,
-                title="Variant-pair cosine similarity averaged over selected personas",
-                show=False,
-            )
-            if pair_traces
-            else None
-        )
-        st.session_state[cosine_fig_key] = (
-            fig,
-            pair_fig,
-            len(display_traces),
-            len(pair_traces),
-        )
+        st.session_state[cosine_fig_key] = figures
 
     if cosine_fig_key in st.session_state:
         fig, pair_fig, n_traces, n_pair_traces = st.session_state[cosine_fig_key]
@@ -369,190 +402,89 @@ def _select_single_variant_samples(
     return variant, persona_ids, persona_key, selected_layers
 
 
-def _baseline_available(
-    store: ActivationStore,
-) -> bool:
-    return BASELINE_PERSONA_ID in store.list_personas(
-        [BASELINE_PERSONA_ID],
-        warn_missing=False,
-    )
-
-
-def _render_baseline_reference_toggle(
+def _render_layered_figure_analysis(
     store: ActivationStore,
     mask_strategy: MaskStrategy,
+    *,
     scope: str,
-) -> bool:
-    available = _baseline_available(store)
-    return st.checkbox(
-        "Include Assistant baseline reference",
-        value=available,
-        disabled=not available,
-        key=widget_key("load", "include_baseline", scope, mask_strategy.value),
-        help=(
-            "Adds the single saved baseline artifact as one reference sample."
-            if available
-            else "Run Assistant baseline extraction first."
-        ),
-    )
-
-
-def _render_similarity_matrix(
-    store: ActivationStore,
-    mask_strategy: MaskStrategy,
+    figure_kind: str,
+    button_label: str,
+    title_fn: Callable[[str], str],
+    include_pair_trajectories: bool = False,
 ) -> None:
-    selected = _select_single_variant_samples(
-        store,
-        mask_strategy,
-        "similarity_matrix",
-    )
-    if selected is None:
-        return
-    variant, persona_ids, persona_key, selected_layers = selected
-    include_baseline = _render_baseline_reference_toggle(
-        store,
-        mask_strategy,
-        "similarity_matrix",
-    )
+    """Render a single-variant layered analysis: select → button → figure(s).
 
-    fig_key = widget_key(
-        "load",
-        "similarity_matrix_fig_state",
-        store.model_name,
-        mask_strategy.value,
-        variant,
-        "persona_mean",
-        persona_key,
-        BASELINE_PERSONA_ID if include_baseline else "no_baseline",
-    )
-    filename = _filename(
-        "compare",
-        "similarity_matrix",
-        store.model_name,
-        mask_strategy.value,
-        variant,
-        "persona_mean",
-        persona_key,
-        BASELINE_PERSONA_ID if include_baseline else "",
-    )
-
-    if st.button("Generate similarity matrix", type="primary"):
-        try:
-            samples = load_persona_mean_samples(
-                store,
-                variant,
-                mask_strategy=mask_strategy,
-                persona_ids=persona_ids,
-                include_baseline=include_baseline,
-            )
-            matrix_fig = build_layered_figure(
-                samples,
-                "similarity",
-                layers=selected_layers,
-                title=(
-                    "Centered similarity - "
-                    f"{prompt_variant_label(variant)} - personas averaged over questions"
-                ),
-            )
-            trajectory_fig = build_pair_similarity_figure(
-                samples,
-                layers=selected_layers,
-                title=(
-                    "Pair similarity trajectories - "
-                    f"{prompt_variant_label(variant)} - personas averaged over questions"
-                ),
-            )
-            st.session_state[fig_key] = (
-                matrix_fig,
-                trajectory_fig,
-                samples.vectors.shape[0],
-            )
-        except Exception as exc:
-            st.error(f"Could not build similarity matrix: {exc}")
-            st.session_state.pop(fig_key, None)
-
-    if fig_key in st.session_state:
-        matrix_fig, trajectory_fig, n_samples = st.session_state[fig_key]
-        st.plotly_chart(matrix_fig, width="stretch")
-        st.subheader("Pair trajectories")
-        st.plotly_chart(trajectory_fig, width="stretch")
-        _render_save_buttons(
-            [matrix_fig, trajectory_fig],
-            [filename, f"{filename}__pair_trajectories"],
-            "similarity_matrix",
-        )
-        st.success(f"Loaded {n_samples} samples.")
-
-
-def _render_embedding_analysis(
-    store: ActivationStore,
-    analysis_mode: str,
-    mask_strategy: MaskStrategy,
-) -> None:
-    selected = _select_single_variant_samples(
-        store,
-        mask_strategy,
-        analysis_mode.lower(),
-    )
+    Used for similarity matrix, PCA, and UMAP. Set ``include_pair_trajectories``
+    to add the pair-similarity-trajectory figure (similarity matrix only).
+    """
+    selected = _select_single_variant_samples(store, mask_strategy, scope)
     if selected is None:
         return
     variant, persona_ids, persona_key, selected_layers = selected
 
-    figure_kind = analysis_mode.lower()
-    include_baseline = _render_baseline_reference_toggle(
-        store,
-        mask_strategy,
-        analysis_mode.lower(),
-    )
-
     fig_key = widget_key(
         "load",
-        "embedding_fig_state",
+        f"{scope}_fig_state",
         store.model_name,
         mask_strategy.value,
         figure_kind,
         variant,
         "persona_mean",
         persona_key,
-        BASELINE_PERSONA_ID if include_baseline else "no_baseline",
     )
     filename = _filename(
         "compare",
-        figure_kind,
+        scope,
         store.model_name,
         mask_strategy.value,
         variant,
         "persona_mean",
         persona_key,
-        BASELINE_PERSONA_ID if include_baseline else "",
     )
 
-    if st.button(f"Generate {analysis_mode} projection", type="primary"):
+    if st.button(button_label, type="primary"):
         try:
             samples = load_persona_mean_samples(
                 store,
                 variant,
                 mask_strategy=mask_strategy,
                 persona_ids=persona_ids,
-                include_baseline=include_baseline,
             )
-            fig = build_layered_figure(
+            main_fig = build_layered_figure(
                 samples,
                 figure_kind,
                 layers=selected_layers,
-                title=(
-                    f"{analysis_mode} - {prompt_variant_label(variant)} - Persona means"
-                ),
+                title=title_fn(variant),
             )
-            st.session_state[fig_key] = (fig, samples.vectors.shape[0])
+            extra_fig = (
+                build_pair_similarity_figure(
+                    samples,
+                    layers=selected_layers,
+                    title=(
+                        "Pair similarity trajectories - "
+                        f"{prompt_variant_label(variant)} - "
+                        "persona mean activations"
+                    ),
+                )
+                if include_pair_trajectories
+                else None
+            )
+            st.session_state[fig_key] = (main_fig, extra_fig, samples.vectors.shape[0])
         except Exception as exc:
-            st.error(f"Could not build {analysis_mode}: {exc}")
+            st.error(f"Could not build figure: {exc}")
             st.session_state.pop(fig_key, None)
 
     if fig_key in st.session_state:
-        fig, n_samples = st.session_state[fig_key]
-        st.plotly_chart(fig, width="stretch")
-        _render_save_buttons([fig], [filename], figure_kind)
+        main_fig, extra_fig, n_samples = st.session_state[fig_key]
+        st.plotly_chart(main_fig, width="stretch")
+        figs = [main_fig]
+        filenames = [filename]
+        if extra_fig is not None:
+            st.subheader("Pair trajectories")
+            st.plotly_chart(extra_fig, width="stretch")
+            figs.append(extra_fig)
+            filenames.append(f"{filename}__pair_trajectories")
+        _render_save_buttons(figs, filenames, scope)
         st.success(f"Loaded {n_samples} samples.")
 
 
@@ -562,9 +494,7 @@ def render_compare_tab(model_name: str) -> None:
     st.title("Compare")
     st.caption("Compare saved activations by cosine similarity, PCA, or UMAP.")
 
-    st.subheader("Analysis")
-
-    with st.expander("Advanced", expanded=False):
+    with st.expander("Artifact settings", expanded=False):
         artifacts_root = st.text_input(
             "Artifacts root",
             value=str(get_artifacts_dir() / "activations"),
@@ -580,14 +510,35 @@ def render_compare_tab(model_name: str) -> None:
     if analysis_mode is None:
         analysis_mode = ANALYSIS_MODES[0]
     st.caption(ANALYSIS_HELP_TEXT[analysis_mode])
-    mask_strategy = _render_mask_strategy_select(analysis_mode)
+    with st.expander("Activation settings", expanded=False):
+        mask_strategy = _render_mask_strategy_select(analysis_mode)
     store = ActivationStore(model_name, artifacts_root, mask_strategy=mask_strategy)
 
     if analysis_mode == "Cosine similarity":
         _render_cosine_similarity(store, mask_strategy)
         return
     if analysis_mode == "Similarity matrix":
-        _render_similarity_matrix(store, mask_strategy)
+        _render_layered_figure_analysis(
+            store,
+            mask_strategy,
+            scope="similarity_matrix",
+            figure_kind="similarity",
+            button_label="Generate similarity matrix",
+            title_fn=lambda v: (
+                "Centered similarity - "
+                f"{prompt_variant_label(v)} - persona mean activations"
+            ),
+            include_pair_trajectories=True,
+        )
         return
 
-    _render_embedding_analysis(store, analysis_mode, mask_strategy)
+    _render_layered_figure_analysis(
+        store,
+        mask_strategy,
+        scope=analysis_mode.lower(),
+        figure_kind=analysis_mode.lower(),
+        button_label=f"Generate {analysis_mode} projection",
+        title_fn=lambda v: (
+            f"{analysis_mode} - {prompt_variant_label(v)} - Persona means"
+        ),
+    )

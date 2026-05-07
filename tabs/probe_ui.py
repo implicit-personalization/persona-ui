@@ -16,13 +16,6 @@ from utils.probes import (
 from utils.runtime import cached_model
 
 
-def _token_button_label(index: int, token: str) -> str:
-    display = token.encode("unicode_escape").decode("ascii") or "<empty>"
-    if len(display) > 18:
-        display = display[:15] + "..."
-    return f"{index}: {display}"
-
-
 def _render_probe_results(result: ProbeRunResult, probe: LoadedProbe) -> None:
     top_k = min(5, int(result.probabilities.numel()))
     if top_k == 0:
@@ -95,55 +88,27 @@ def _load_probe_from_controls(context_key: str) -> LoadedProbe | None:
     return load_probe(repo_id.strip(), selected_file)
 
 
-def _render_token_buttons(trace: ConversationTrace, context_key: str) -> int:
-    selected_key = widget_key(
-        context_key,
-        "probe_selected_token",
-        trace.prompt_hash[:12],
-    )
-    selected = int(st.session_state.get(selected_key, trace.n_tokens - 1))
-    selected = max(0, min(selected, trace.n_tokens - 1))
-
-    window_size = st.slider(
-        "Token window",
-        min_value=8,
-        max_value=min(96, max(8, trace.n_tokens)),
-        value=min(32, max(8, trace.n_tokens)),
-        step=8,
-        key=widget_key(context_key, "probe_token_window", trace.prompt_hash[:12]),
-    )
-    center = st.slider(
-        "Window center",
+def _render_token_picker(trace: ConversationTrace, context_key: str) -> int:
+    selected = st.slider(
+        "Token index",
         min_value=0,
         max_value=trace.n_tokens - 1,
-        value=selected,
-        key=widget_key(context_key, "probe_token_center", trace.prompt_hash[:12]),
+        value=trace.n_tokens - 1,
+        key=widget_key(context_key, "probe_selected_token", trace.prompt_hash[:12]),
     )
-    start = max(0, center - window_size // 2)
-    end = min(trace.n_tokens, start + window_size)
-    start = max(0, end - window_size)
 
-    cols = st.columns(8)
-    for offset, token_index in enumerate(range(start, end)):
-        col = cols[offset % len(cols)]
-        token = trace.tokens[token_index]
-        if col.button(
-            _token_button_label(token_index, token),
-            key=widget_key(
-                context_key,
-                "probe_token",
-                trace.prompt_hash[:12],
-                str(token_index),
-            ),
-            type="primary" if token_index == selected else "secondary",
-            help=token.encode("unicode_escape").decode("ascii"),
-        ):
-            selected = token_index
-            st.session_state[selected_key] = token_index
-
-    st.caption(
-        f"Selected token {selected}: "
-        f"`{trace.tokens[selected].encode('unicode_escape').decode('ascii')}`"
+    window = 8
+    start = max(0, selected - window)
+    end = min(trace.n_tokens, selected + window + 1)
+    parts: list[str] = []
+    for i in range(start, end):
+        token_repr = trace.tokens[i].encode("unicode_escape").decode("ascii") or "·"
+        parts.append(f"**[{token_repr}]**" if i == selected else token_repr)
+    st.markdown(
+        f"<div style='font-family:ui-monospace,monospace;font-size:0.85em;"
+        f"line-height:1.6;background:rgba(127,127,127,0.08);padding:6px 10px;"
+        f"border-radius:4px;'>{' '.join(parts)}</div>",
+        unsafe_allow_html=True,
     )
     return selected
 
@@ -161,6 +126,128 @@ def _model_dimensions(model: object) -> tuple[int, int]:
     if hidden_size is None or num_layers is None:
         raise ValueError("Could not read hidden_size and num_layers from the model.")
     return int(hidden_size), int(num_layers)
+
+
+def _load_model_with_dimensions(model_name: str) -> tuple[object, int, int] | None:
+    with st.spinner("Loading model metadata..."):
+        model = cached_model(model_name=model_name)
+    try:
+        hidden_size, num_layers = _model_dimensions(model)
+    except Exception as exc:
+        st.error(str(exc))
+        return None
+    return model, hidden_size, num_layers
+
+
+def _select_probe_target(
+    *,
+    probe: LoadedProbe,
+    context_key: str,
+    num_layers: int,
+) -> tuple[int, str]:
+    layer = probe.layer
+    if layer is None:
+        layer = int(
+            st.number_input(
+                "Layer",
+                min_value=0,
+                max_value=max(0, num_layers - 1),
+                value=min(15, max(0, num_layers - 1)),
+                step=1,
+                key=widget_key(context_key, "probe_layer"),
+            )
+        )
+
+    location = probe.location
+    if location is None:
+        location = st.selectbox(
+            "Activation location",
+            options=("post_reasoning", "pre_reasoning"),
+            key=widget_key(context_key, "probe_location"),
+        )
+    return layer, location
+
+
+def _probe_target_is_valid(
+    *,
+    probe: LoadedProbe,
+    layer: int,
+    num_layers: int,
+    hidden_size: int,
+) -> bool:
+    if not 0 <= layer < num_layers:
+        st.error(f"Probe layer {layer} is outside the model's {num_layers} layers.")
+        return False
+    if probe.input_dim != hidden_size:
+        st.warning(
+            "This probe input dim does not match a single-token activation "
+            "for the active model."
+        )
+        return False
+    return True
+
+
+def _trace_requested(context_key: str) -> bool:
+    trace_key = widget_key(context_key, "probe_trace_enabled")
+    if st.button(
+        "Trace conversation",
+        key=widget_key(context_key, "probe_trace"),
+        use_container_width=True,
+    ):
+        st.session_state[trace_key] = True
+    return bool(st.session_state.get(trace_key, False))
+
+
+def _trace_active_conversation(
+    *,
+    model: object,
+    model_name: str,
+    remote: bool,
+    active_system_prompt: str | None,
+    chat_state: dict[str, object],
+    layer: int,
+    location: str,
+) -> ConversationTrace | None:
+    messages = build_chat_messages(active_system_prompt, chat_state["messages"])
+    with st.spinner("Tracing conversation..."):
+        trace = trace_conversation(
+            model=model,
+            model_name=model_name,
+            messages=messages,
+            layer=layer,
+            location=location,
+            remote=remote,
+        )
+
+    st.caption(
+        f"Cached {trace.n_tokens} tokens from layer {trace.layer}; "
+        f"prompt hash `{trace.prompt_hash[:10]}`"
+    )
+    if trace.n_tokens == 0:
+        st.warning("The traced conversation produced no tokens.")
+        return None
+    return trace
+
+
+def _run_probe_on_selected_token(
+    *,
+    trace: ConversationTrace,
+    context_key: str,
+    probe: LoadedProbe,
+) -> None:
+    selected_token = _render_token_picker(trace, context_key)
+    try:
+        vector = vectorize_token(trace, token_index=selected_token)
+        result = probe.run(vector.vector)
+    except Exception as exc:
+        st.error(f"Probe execution failed: {exc}")
+        return
+
+    st.caption(
+        f"Vectorization {vector.mode}; token {vector.token_index}; "
+        f"vector dim {int(vector.vector.shape[0])}"
+    )
+    _render_probe_results(result, probe)
 
 
 def render_probe_inspector(
@@ -188,88 +275,40 @@ def render_probe_inspector(
         if probe is None:
             return
 
-        with st.spinner("Loading model metadata..."):
-            model = cached_model(model_name=model_name, remote=remote)
-        try:
-            hidden_size, num_layers = _model_dimensions(model)
-        except Exception as exc:
-            st.error(str(exc))
+        loaded = _load_model_with_dimensions(model_name)
+        if loaded is None:
             return
+        model, hidden_size, num_layers = loaded
 
-        layer = probe.layer
-        if layer is None:
-            layer = int(
-                st.number_input(
-                    "Layer",
-                    min_value=0,
-                    max_value=max(0, num_layers - 1),
-                    value=min(15, max(0, num_layers - 1)),
-                    step=1,
-                    key=widget_key(context_key, "probe_layer"),
-                )
-            )
-
-        location = probe.location
-        if location is None:
-            location = st.selectbox(
-                "Activation location",
-                options=("post_reasoning", "pre_reasoning"),
-                key=widget_key(context_key, "probe_location"),
-            )
-
+        layer, location = _select_probe_target(
+            probe=probe,
+            context_key=context_key,
+            num_layers=num_layers,
+        )
         st.caption(
             f"Probe layer {layer}; {location}; input dim {probe.input_dim}; "
             f"model hidden size {hidden_size}"
         )
-        if not 0 <= layer < num_layers:
-            st.error(f"Probe layer {layer} is outside the model's {num_layers} layers.")
-            return
-        if probe.input_dim != hidden_size:
-            st.warning(
-                "This probe input dim does not match a single-token activation "
-                "for the active model."
-            )
-            return
-
-        trace_key = widget_key(context_key, "probe_trace_enabled")
-        if st.button(
-            "Trace conversation",
-            key=widget_key(context_key, "probe_trace"),
-            use_container_width=True,
+        if not _probe_target_is_valid(
+            probe=probe,
+            layer=layer,
+            num_layers=num_layers,
+            hidden_size=hidden_size,
         ):
-            st.session_state[trace_key] = True
-        if not st.session_state.get(trace_key, False):
             return
 
-        messages = build_chat_messages(active_system_prompt, chat_state["messages"])
-        with st.spinner("Tracing conversation..."):
-            trace = trace_conversation(
-                model=model,
-                model_name=model_name,
-                messages=messages,
-                layer=layer,
-                location=location,
-                remote=remote,
-            )
+        if not _trace_requested(context_key):
+            return
 
-        st.caption(
-            f"Cached {trace.n_tokens} tokens from layer {trace.layer}; "
-            f"prompt hash `{trace.prompt_hash[:10]}`"
+        trace = _trace_active_conversation(
+            model=model,
+            model_name=model_name,
+            remote=remote,
+            active_system_prompt=active_system_prompt,
+            chat_state=chat_state,
+            layer=layer,
+            location=location,
         )
-        if trace.n_tokens == 0:
-            st.warning("The traced conversation produced no tokens.")
+        if trace is None:
             return
-
-        selected_token = _render_token_buttons(trace, context_key)
-        try:
-            vector = vectorize_token(trace, token_index=selected_token)
-            result = probe.run(vector.vector)
-        except Exception as exc:
-            st.error(f"Probe execution failed: {exc}")
-            return
-
-        st.caption(
-            f"Vectorization {vector.mode}; token {vector.token_index}; "
-            f"vector dim {int(vector.vector.shape[0])}"
-        )
-        _render_probe_results(result, probe)
+        _run_probe_on_selected_token(trace=trace, context_key=context_key, probe=probe)

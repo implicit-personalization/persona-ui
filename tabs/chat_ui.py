@@ -48,6 +48,13 @@ class GenerationConfig:
         }
 
 
+@dataclass(frozen=True)
+class ChatTools:
+    probe_enabled: bool
+    compare_mode: bool
+    token_contrast: bool
+
+
 @st.dialog("Edit", width="medium")
 def _open_edit_dialog(
     *,
@@ -108,13 +115,54 @@ def _open_system_prompt_dialog(*, prompt_key: str, current_value: str) -> None:
             st.rerun()
 
 
-def generation_dict(config: GenerationConfig) -> dict[str, object]:
-    return config.to_export_dict()
-
-
-def render_generation_settings(context_key: str, remote: bool) -> GenerationConfig:
-    """Render the Advanced generation settings expander."""
+def render_advanced_settings(
+    context_key: str,
+    remote: bool,
+    *,
+    last_compare_mode_key: str,
+) -> tuple[GenerationConfig, ChatTools]:
+    """Render the Advanced expander: tool toggles + generation settings."""
     with st.expander("Advanced", expanded=False):
+        st.caption("Tools")
+
+        compare_key = widget_key(context_key, "compare_mode")
+        if compare_key not in st.session_state:
+            st.session_state[compare_key] = st.session_state.get(
+                last_compare_mode_key, False
+            )
+
+        tools_col1, tools_col2, tools_col3 = st.columns(3)
+        with tools_col1:
+            probe_enabled = st.toggle(
+                "Probe tools",
+                value=False,
+                key=widget_key(context_key, "probe_enabled"),
+                help="Trace chat activations and run compatible `.pt` probes on tapped tokens.",
+            )
+        with tools_col2:
+            compare_mode = st.toggle(
+                "Compare mode",
+                key=compare_key,
+                help="Side-by-side: send one message to two independent persona/prompt configurations.",
+            )
+        with tools_col3:
+            token_contrast = st.toggle(
+                "Token contrast",
+                value=False,
+                key=widget_key(context_key, "token_contrast"),
+                disabled=not compare_mode,
+                help=(
+                    "Color each generated token by how characteristic it is of each persona. "
+                    "Red = more likely under the left persona, blue = more likely under the "
+                    "right. Requires up to four extra scoring passes after each turn. "
+                    "Available only in Compare mode."
+                ),
+            )
+        st.session_state[last_compare_mode_key] = compare_mode
+
+        st.divider()
+        st.caption("Generation")
+
         config_col1, config_col2 = st.columns([2, 1])
         with config_col1:
             max_new_tokens = st.slider(
@@ -199,7 +247,7 @@ def render_generation_settings(context_key: str, remote: bool) -> GenerationConf
             st.caption("Seed is local-only and disabled for remote runs.")
 
     do_sample = bool(use_sampling)
-    return GenerationConfig(
+    generation = GenerationConfig(
         max_new_tokens=int(max_new_tokens),
         do_sample=do_sample,
         temperature=float(temperature),
@@ -208,6 +256,12 @@ def render_generation_settings(context_key: str, remote: bool) -> GenerationConf
         repetition_penalty=float(repetition_penalty),
         seed=seed if do_sample and seed is not None and not remote else None,
     )
+    tools = ChatTools(
+        probe_enabled=probe_enabled,
+        compare_mode=compare_mode,
+        token_contrast=token_contrast and compare_mode,
+    )
+    return generation, tools
 
 
 def render_chat_message(

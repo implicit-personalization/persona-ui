@@ -11,7 +11,6 @@ Negative (blue) → token is more characteristic of persona B.
 Near-zero (gray) → both personas would emit this token with similar likelihood.
 """
 
-import logging
 from dataclasses import dataclass
 from html import escape
 
@@ -19,8 +18,6 @@ import torch
 from nnterp import StandardizedTransformer
 
 from utils.chat import format_generation_prompt
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -73,28 +70,18 @@ def _strip_special_ids(
     return ids[keep], keep
 
 
-def _prepare_trace_text(
+def _prepare_trace_input_ids(
     tokenizer: object,
     context_messages: list[dict[str, str]],
     response_ids: torch.Tensor,
-) -> tuple[str, int, int]:
-    """Build the trace text and return ``(full_text, n_ctx, n_resp)``."""
+) -> tuple[torch.Tensor, int, int]:
+    """Build exact trace input ids and return ``(input_ids, n_ctx, n_resp)``."""
     context_prompt, _ = format_generation_prompt(context_messages, tokenizer)
     context_ids = tokenizer(context_prompt, return_tensors="pt").input_ids[0]
-    response_text = _decode_ids(tokenizer, response_ids.tolist())
-    full_text = context_prompt + response_text
-    full_ids = tokenizer(full_text, return_tensors="pt").input_ids[0]
-    expected_ids = torch.cat([context_ids, response_ids.cpu()])
-    if full_ids.tolist() != expected_ids.tolist():
-        logger.warning(
-            "contrast trace text did not round-trip to the expected token ids "
-            "(expected %d tokens, got %d); contrast scores may be slightly misaligned",
-            len(expected_ids),
-            len(full_ids),
-        )
+    input_ids = torch.cat([context_ids.cpu(), response_ids.detach().cpu()])
     n_ctx = len(context_ids)
     n_resp = len(response_ids)
-    return full_text, n_ctx, n_resp
+    return input_ids, n_ctx, n_resp
 
 
 def _build_contrast(
@@ -122,8 +109,8 @@ def _token_display(tokenizer: object, token_id: int) -> str:
     return _decode_ids(tokenizer, [token_id])
 
 
-# Each spec: (key, full_text, n_ctx, n_resp, target_ids).
-PassSpec = tuple[str, str, int, int, torch.Tensor]
+# Each spec: (key, input_ids, n_ctx, n_resp, target_ids).
+PassSpec = tuple[str, torch.Tensor, int, int, torch.Tensor]
 
 
 def _score_passes(
@@ -140,12 +127,12 @@ def _score_passes(
     """
 
     def _score_pass(
-        full_text: str,
+        input_ids: torch.Tensor,
         n_ctx: int,
         n_resp: int,
         target_ids: torch.Tensor,
     ) -> torch.Tensor:
-        with torch.no_grad(), model.trace(full_text, remote=remote):
+        with torch.no_grad(), model.trace(input_ids, remote=remote):
             # logit at position i predicts token i+1, so response token j
             # (at full-text position n_ctx+j) uses logit at n_ctx+j-1.
             resp_logits = model.logits[0, n_ctx - 1 : n_ctx - 1 + n_resp].float()
@@ -163,8 +150,8 @@ def _score_passes(
         return out.detach().cpu()
 
     return {
-        key: _score_pass(full_text, n_ctx, n_resp, target_ids)
-        for key, full_text, n_ctx, n_resp, target_ids in specs
+        key: _score_pass(input_ids, n_ctx, n_resp, target_ids)
+        for key, input_ids, n_ctx, n_resp, target_ids in specs
     }
 
 
@@ -176,11 +163,13 @@ def _specs_for_response(
     prefix: str,
 ) -> list[PassSpec]:
     """Build the (under_a, under_b) pass specs for a single response."""
-    text_a, n_ctx_a, n_resp = _prepare_trace_text(tokenizer, context_a, response_ids)
-    text_b, n_ctx_b, _ = _prepare_trace_text(tokenizer, context_b, response_ids)
+    input_a, n_ctx_a, n_resp = _prepare_trace_input_ids(
+        tokenizer, context_a, response_ids
+    )
+    input_b, n_ctx_b, _ = _prepare_trace_input_ids(tokenizer, context_b, response_ids)
     return [
-        (f"{prefix}_under_a", text_a, n_ctx_a, n_resp, response_ids),
-        (f"{prefix}_under_b", text_b, n_ctx_b, n_resp, response_ids),
+        (f"{prefix}_under_a", input_a, n_ctx_a, n_resp, response_ids),
+        (f"{prefix}_under_b", input_b, n_ctx_b, n_resp, response_ids),
     ]
 
 

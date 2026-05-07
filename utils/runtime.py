@@ -1,8 +1,56 @@
+import json
 import logging
+from collections.abc import Iterable
 
 import streamlit as st
 
 logger = logging.getLogger(__name__)
+_LANGUAGE_MODEL_CLASSES = {"LanguageModel", "StandardizedTransformer"}
+_EXPECTED_NDIF_STATES = {"RUNNING", "NOT DEPLOYED", "DEPLOYING", "DELETING"}
+
+
+def _iter_deployments(raw: object) -> Iterable[dict]:
+    if not isinstance(raw, dict):
+        return ()
+    deployments = raw.get("deployments", {})
+    if not isinstance(deployments, dict):
+        return ()
+    return (value for value in deployments.values() if isinstance(value, dict))
+
+
+def _is_visible_deployment(deployment: dict) -> bool:
+    return deployment.get("deployment_level") in {"HOT", "WARM"} or (
+        "schedule" in deployment
+    )
+
+
+def _repo_id_from_model_key(model_key: str) -> str:
+    try:
+        repo_id = json.loads(model_key.split(":", 1)[-1]).get("repo_id")
+    except Exception:
+        return model_key
+    return repo_id if isinstance(repo_id, str) else model_key
+
+
+def _running_language_model(deployment: dict) -> str | None:
+    if not _is_visible_deployment(deployment):
+        return None
+
+    model_key = deployment.get("model_key", "")
+    model_class = model_key.split(":", 1)[0].split(".")[-1]
+    if model_class not in _LANGUAGE_MODEL_CLASSES:
+        return None
+    if deployment.get("application_state", "NOT DEPLOYED") != "RUNNING":
+        return None
+    return _repo_id_from_model_key(model_key)
+
+
+def _unexpected_state(deployment: dict) -> tuple[str, str] | None:
+    state = deployment.get("application_state", "NOT DEPLOYED")
+    if state in _EXPECTED_NDIF_STATES:
+        return None
+    model_key = deployment.get("model_key", "")
+    return _repo_id_from_model_key(model_key), state
 
 
 @st.cache_data(show_spinner=False, ttl=30)
@@ -16,8 +64,6 @@ def list_remote_models() -> list[str]:
     the whole response. See nnsight 0.6.3 ``ndif.py::status``.
     """
 
-    import json
-
     import nnsight
 
     try:
@@ -29,32 +75,11 @@ def list_remote_models() -> list[str]:
     model_names: list[str] = []
     bad_states: list[tuple[str, str]] = []  # (repo_id_or_key, application_state)
 
-    for value in (raw or {}).get("deployments", {}).values():
-        if not isinstance(value, dict):
-            continue
-        if (
-            value.get("deployment_level") not in {"HOT", "WARM"}
-            and "schedule" not in value
-        ):
-            continue
-
-        model_key = value.get("model_key", "")
-        model_class = model_key.split(":", 1)[0].split(".")[-1]
-        try:
-            repo_id = json.loads(model_key.split(":", 1)[-1]).get("repo_id")
-        except Exception:
-            repo_id = model_key
-
-        state = value.get("application_state", "NOT DEPLOYED")
-        if state not in {"RUNNING", "NOT DEPLOYED", "DEPLOYING", "DELETING"}:
-            bad_states.append((repo_id or model_key, state))
-
-        if model_class not in {"LanguageModel", "StandardizedTransformer"}:
-            continue
-        if state != "RUNNING":
-            continue
-        if isinstance(repo_id, str):
-            model_names.append(repo_id)
+    for deployment in _iter_deployments(raw):
+        if bad_state := _unexpected_state(deployment):
+            bad_states.append(bad_state)
+        if model_name := _running_language_model(deployment):
+            model_names.append(model_name)
 
     if bad_states:
         logger.warning(
@@ -67,27 +92,17 @@ def list_remote_models() -> list[str]:
 
 
 @st.cache_resource(show_spinner=False, max_entries=1)
-def _cached_model_by_name(model_name: str):
+def cached_model(model_name: str):
     """Load and cache a standardized nnterp model.
 
     Streamlit reruns this app on every interaction, so caching keeps one loaded
     model instance per model name instead of reloading weights on every widget
-    change.
+    change. ``remote`` is intentionally not part of the cache key: it matters
+    at generation/trace time, but the current ``StandardizedTransformer``
+    constructor ignores it, and excluding it avoids loading duplicate local
+    model objects when toggling NDIF.
     """
 
     from nnterp import StandardizedTransformer
 
-    # The remote constructor path is currently unstable for this model wrapper.
-    # return StandardizedTransformer(model_name, remote=remote, check_renaming=False)
     return StandardizedTransformer(model_name)
-
-
-def cached_model(model_name: str, remote: bool):
-    """Return the cached model for ``model_name``.
-
-    ``remote`` still matters at generation/trace time, but the current
-    ``StandardizedTransformer`` constructor ignores it. Keeping it out of the
-    cache key avoids loading duplicate local model objects when toggling NDIF.
-    """
-
-    return _cached_model_by_name(model_name)

@@ -1,11 +1,11 @@
 import streamlit as st
+from persona_data.synth_persona import PersonaData
 
-from state import chat_session_key, get_chat_state, reset_chat_context_state
+from state import ChatState, chat_session_key, get_chat_state, reset_chat_context_state
 from tabs.chat_ui import (
     GenerationConfig,
-    generation_dict,
+    render_advanced_settings,
     render_chat_window,
-    render_generation_settings,
     render_persona_prompt_controls,
     render_system_prompt,
 )
@@ -27,10 +27,114 @@ _LAST_PROMPT_MODE_KEY = "chat:last_prompt_mode"
 _LAST_COMPARE_MODE_KEY = "chat:last_compare_mode"
 
 
+def _load_personas(dataset_source: str) -> list[PersonaData] | None:
+    try:
+        dataset, dataset_status = load_dataset(
+            dataset_source,
+            personas_file=st.session_state.get("extract__personas_file"),
+            qa_file=st.session_state.get("extract__qa_file"),
+        )
+        st.caption(dataset_status)
+    except Exception as exc:
+        st.error(f"Could not load data: {exc}")
+        st.info("Check the selected dataset source or upload both JSONL files.")
+        return None
+
+    personas = list(dataset)
+    if not personas:
+        st.warning("No personas found in the selected dataset.")
+        st.info("Try a different dataset source or upload a non-empty personas file.")
+        return None
+    return personas
+
+
+def _render_single_chat_footer(
+    *,
+    model_name: str,
+    dataset_source: str,
+    persona: PersonaData,
+    prompt_mode: str,
+    system_prompt: str | None,
+    chat_state: ChatState,
+    generation: GenerationConfig,
+    export_key: str,
+    reset_key: str,
+    on_reset,
+) -> None:
+    footer = st.container()
+    with footer:
+        exp_col, rst_col, _spacer = st.columns([0.5, 0.5, 10], gap="xsmall")
+        with exp_col:
+            if st.button(
+                "",
+                icon=":material/download:",
+                key=export_key,
+                help="Export chat",
+            ):
+                save_chat_export(
+                    model_name=model_name,
+                    dataset_source=dataset_source,
+                    persona_id=persona.id,
+                    persona_name=getattr(persona, "name", None),
+                    prompt_mode=prompt_mode,
+                    system_prompt=system_prompt,
+                    messages=chat_state["messages"],
+                    generation=generation.to_export_dict(),
+                )
+                st.toast("Exported", icon=":material/check:")
+        with rst_col:
+            if st.button(
+                "",
+                icon=":material/delete_sweep:",
+                key=reset_key,
+                help="Reset chat",
+            ):
+                on_reset()
+                st.rerun()
+
+
+def _handle_single_chat_generation(
+    *,
+    remote: bool,
+    model_name: str,
+    chat_state: ChatState,
+    active_system_prompt: str | None,
+    generation: GenerationConfig,
+    pending_action: object,
+    chat_log,
+) -> None:
+    messages = build_chat_messages(active_system_prompt, chat_state["messages"])
+
+    with st.spinner("Generating reply..."):
+        model = cached_model(model_name=model_name)
+        try:
+            reply: ChatReply = generate_chat_reply(
+                model=model,
+                messages=messages,
+                remote=remote,
+                past_key_values=chat_state["past_key_values"],
+                **generation.to_generate_kwargs(),
+            )
+        except Exception as exc:
+            with chat_log:
+                st.error(f"Could not generate a reply: {exc}")
+                st.info("Try a shorter prompt, reset the chat, or switch personas.")
+            if pending_action == "new_user_prompt" and chat_state["messages"]:
+                chat_state["messages"].pop()
+            return
+
+    chat_state["messages"].append({"role": "assistant", "content": reply.text})
+    chat_state["past_key_values"] = reply.past_key_values if not remote else None
+    st.rerun()
+
+
+
+
 def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     """Render the chat tab."""
 
     st.title("Chat")
+    st.caption("Chat with a persona, optionally side-by-side or with token contrast.")
 
     context_key = chat_session_key(model_name, dataset_source)
     chat_state = get_chat_state(model_name, remote, dataset_source)
@@ -42,46 +146,16 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
             _LAST_PROMPT_MODE_KEY, "templated"
         )
 
-    try:
-        dataset, dataset_status = load_dataset(
-            dataset_source,
-            personas_file=st.session_state.get("extract__personas_file"),
-            qa_file=st.session_state.get("extract__qa_file"),
-        )
-        st.caption(dataset_status)
-    except Exception as exc:
-        st.error(f"Could not load data: {exc}")
-        st.info("Check the selected dataset source or upload both JSONL files.")
+    personas = _load_personas(dataset_source)
+    if personas is None:
         return
 
-    personas = list(dataset)
-    if not personas:
-        st.warning("No personas found in the selected dataset.")
-        st.info("Try a different dataset source or upload a non-empty personas file.")
-        return
-
-    generation: GenerationConfig = render_generation_settings(context_key, remote)
-    probe_enabled = st.toggle(
-        "Probe tools",
-        value=False,
-        key=widget_key(context_key, "probe_enabled"),
-        help="Trace chat activations and run compatible `.pt` probes on tapped tokens.",
+    generation, tools = render_advanced_settings(
+        context_key,
+        remote,
+        last_compare_mode_key=_LAST_COMPARE_MODE_KEY,
     )
-
-    # ── Mode toggle ───────────────────────────────────────────────────────────
-    compare_key = widget_key(context_key, "compare_mode")
-    if compare_key not in st.session_state:
-        st.session_state[compare_key] = st.session_state.get(
-            _LAST_COMPARE_MODE_KEY, False
-        )
-    compare_mode = st.toggle(
-        "Compare mode",
-        key=compare_key,
-        help="Side-by-side: send one message to two independent persona/prompt configurations.",
-    )
-    st.session_state[_LAST_COMPARE_MODE_KEY] = compare_mode
-
-    if compare_mode:
+    if tools.compare_mode:
         render_compare_mode(
             remote,
             model_name,
@@ -89,6 +163,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
             dataset_source,
             personas,
             generation,
+            contrast_enabled=tools.token_contrast,
         )
         return
 
@@ -150,7 +225,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         remote=remote,
         active_system_prompt=active_system_prompt,
         chat_state=chat_state,
-        enabled=probe_enabled,
+        enabled=tools.probe_enabled,
     )
 
     render_chat_window(
@@ -161,36 +236,18 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         pending_key=pending_key,
     )
 
-    footer = st.container()
-    with footer:
-        exp_col, rst_col, _spacer = st.columns([0.5, 0.5, 10], gap="xsmall")
-        with exp_col:
-            if st.button(
-                "",
-                icon=":material/download:",
-                key=export_key,
-                help="Export chat",
-            ):
-                save_chat_export(
-                    model_name=model_name,
-                    dataset_source=dataset_source,
-                    persona_id=selected_persona.id,
-                    persona_name=getattr(selected_persona, "name", None),
-                    prompt_mode=prompt_mode,
-                    system_prompt=active_system_prompt,
-                    messages=chat_state["messages"],
-                    generation=generation_dict(generation),
-                )
-                st.toast("Exported", icon=":material/check:")
-        with rst_col:
-            if st.button(
-                "",
-                icon=":material/delete_sweep:",
-                key=reset_key,
-                help="Reset chat",
-            ):
-                _reset_active_chat_context()
-                st.rerun()
+    _render_single_chat_footer(
+        model_name=model_name,
+        dataset_source=dataset_source,
+        persona=selected_persona,
+        prompt_mode=prompt_mode,
+        system_prompt=active_system_prompt,
+        chat_state=chat_state,
+        generation=generation,
+        export_key=export_key,
+        reset_key=reset_key,
+        on_reset=_reset_active_chat_context,
+    )
 
     user_prompt = st.chat_input("Ask something...", key=chat_input_key)
 
@@ -205,26 +262,12 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     if not pending_action:
         return
 
-    messages = build_chat_messages(active_system_prompt, chat_state["messages"])
-
-    with st.spinner("Generating reply..."):
-        model = cached_model(model_name=model_name, remote=remote)
-        try:
-            reply: ChatReply = generate_chat_reply(
-                model=model,
-                messages=messages,
-                remote=remote,
-                past_key_values=chat_state["past_key_values"],
-                **generation.to_generate_kwargs(),
-            )
-        except Exception as exc:
-            with chat_log:
-                st.error(f"Could not generate a reply: {exc}")
-                st.info("Try a shorter prompt, reset the chat, or switch personas.")
-            if pending_action == "new_user_prompt" and chat_state["messages"]:
-                chat_state["messages"].pop()
-            return
-
-    chat_state["messages"].append({"role": "assistant", "content": reply.text})
-    chat_state["past_key_values"] = reply.past_key_values if not remote else None
-    st.rerun()
+    _handle_single_chat_generation(
+        remote=remote,
+        model_name=model_name,
+        chat_state=chat_state,
+        active_system_prompt=active_system_prompt,
+        generation=generation,
+        pending_action=pending_action,
+        chat_log=chat_log,
+    )
