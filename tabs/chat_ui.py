@@ -6,13 +6,12 @@ from persona_data.synth_persona import PersonaData
 
 from utils.contrast import TokenContrast, render_contrast_html
 from utils.helpers import (
-    CHAT_PROMPT_MODE_LABELS,
     CHAT_PROMPT_MODE_LABEL_TO_KEY,
+    CHAT_PROMPT_MODE_LABELS,
     VARIANT_LABELS,
     persona_label,
     widget_key,
 )
-
 
 GENERATION_DEFAULTS = {
     "max_new_tokens": 256,

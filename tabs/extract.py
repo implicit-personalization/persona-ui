@@ -7,11 +7,10 @@ from persona_data.synth_persona import BASELINE_PERSONA_ID, PersonaData, QAPair
 from persona_vectors.artifacts import PERSONA_VARIANTS
 from persona_vectors.extraction import (
     MaskStrategy,
-    TokenSegment,
     prepare_inputs_for_strategy,
-    preview_token_segments,
     run_extraction,
 )
+from persona_vectors.preview import TokenSegment, preview_token_segments
 
 from utils.datasets import load_dataset
 from utils.helpers import (
@@ -33,7 +32,6 @@ _DEFAULT_MAX_QUESTIONS = 50
 
 @dataclass(frozen=True)
 class ExtractSettings:
-    runs: list[tuple[PersonaData, list[QAPair]]]
     mask_strategy: MaskStrategy
     max_questions: int
 
@@ -307,7 +305,6 @@ def _render_extract_actions() -> tuple[bool, bool]:
 
 def _render_token_preview(
     *,
-    remote: bool,
     model_name: str,
     run_plan: list[tuple[PersonaData, list[QAPair], str]],
     settings: ExtractSettings,
@@ -387,7 +384,7 @@ def _run_extraction_plan(
         progress.empty()
         ndif_status_box.empty()
 
-    status_box.success("Extraction complete")
+    status_box.empty()
     st.success(f"Saved {len(results)} artifact set(s)")
 
     for result in results:
@@ -448,7 +445,6 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         dataset_source=dataset_source,
     )
     settings = ExtractSettings(
-        runs=runs,
         mask_strategy=mask_strategy,
         max_questions=max_questions,
     )
@@ -458,7 +454,6 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
 
     if preview_clicked:
         _render_token_preview(
-            remote=remote,
             model_name=model_name,
             run_plan=run_plan,
             settings=settings,

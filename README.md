@@ -20,7 +20,7 @@ Streamlit interface for persona vector extraction, analysis, and chat.
 A web app built on top of [persona-vectors](../persona-vectors) that provides three tabs:
 
 - **Chat** — interactive conversations with a model using persona-based system prompts (templated or biography)
-- **Compare** — load saved activations and explore layer-wise cosine similarity, persona-mean PCA, UMAP, and similarity projections
+- **Compare** — load local or Hub persona vectors and explore cosine similarity, PCA, UMAP, and similarity views
 - **Extract** — run activation extraction from HuggingFace persona datasets or a local JSONL dataset directly from the browser
 
 ## Repository Layout
@@ -29,19 +29,20 @@ A web app built on top of [persona-vectors](../persona-vectors) that provides th
 persona-ui/
 ├── app.py                   # Main entry point (Streamlit)
 ├── state.py                 # Session state management (chat history, KV cache)
-├── scripts/
-│   └── oracle_probe.py      # Notebook-style activation oracle script
 ├── tabs/
 │   ├── chat.py              # Chat tab
 │   ├── compare.py           # Activation comparison tab
 │   ├── compare_chat.py      # Side-by-side chat comparison mode
-│   └── extract.py           # Extraction tab
+│   ├── extract.py           # Extraction tab
+│   └── probe_ui.py          # Probe upload and tracing controls
 └── utils/
     ├── chat.py              # Chat generation logic
     ├── chat_export.py       # Export chat logs to JSON
     ├── contrast.py          # Contrastive token log-prob coloring
     ├── datasets.py          # Dataset loader wrapper
     ├── helpers.py           # UI labels and slug helpers
+    ├── probe_trace.py       # Chat-token activation tracing
+    ├── probes.py            # Probe loading and scoring
     └── runtime.py           # Model caching and NDIF queries
 ```
 
@@ -58,13 +59,11 @@ cp .env.example .env
 
 ## Local Development
 
-The committed dependency graph uses git sources so `persona-ui` can install cleanly in a Hugging Face Space or any isolated environment.
+This checkout is configured to use the sibling `../persona-vectors` package as
+an editable dependency. For deployment, switch `persona-vectors` back to the
+published package or another installable source.
 
-For local sibling checkouts, uncomment the `path` sources in `persona-ui/pyproject.toml` and `persona-vectors/pyproject.toml`, then comment out the git sources.
-
-## Local Setup Note
-
-For local development, `persona-data` and `persona-vectors` can still be checked out in the parent directory of `persona-ui`.
+`persona-data` can also be checked out next to this repo for local package work.
 
 Example:
 
@@ -112,13 +111,16 @@ Copy `.env.example` to `.env` and fill in:
 NDIF_API_KEY=...       # Required for remote (NDIF) model execution
 HF_HOME=...            # Optional: HuggingFace cache directory
 ARTIFACTS_DIR=...      # Optional: where activations are read from (default: ./artifacts)
+PERSONA_VECTORS_HUB_REPO=...  # Optional: default Compare-tab Hub dataset repo
 ```
 
 The app picks up this file automatically via `load_dotenv()` on startup.
 
-## Saved Artifacts
+## Persona Vectors
 
-The Compare and Extract tabs read from / write to:
+The Compare tab reads persona vectors from either a Hugging Face dataset created
+by `persona-vectors/scripts/push_to_hf.py` or from local artifacts. The Extract
+tab writes local artifacts to:
 
 ```
 artifacts/

@@ -1,15 +1,16 @@
+import os
 from collections.abc import Callable
-from itertools import combinations
 from dataclasses import dataclass
+from itertools import combinations
 
 import streamlit as st
 from persona_data.environment import get_artifacts_dir
 from persona_vectors.analysis import (
-    load_persona_mean_samples,
-    load_variant_mean_samples,
+    load_persona_vectors,
+    load_variant_vectors,
 )
-from persona_vectors.artifacts import ActivationStore
-from persona_vectors.artifacts import list_layers as list_available_layers
+from persona_vectors.artifacts import ActivationStore, HFActivationStore
+from persona_vectors.artifacts import list_layers as list_local_layers
 from persona_vectors.extraction import MaskStrategy
 from persona_vectors.plots import (
     build_layered_figure,
@@ -28,18 +29,29 @@ from utils.helpers import (
     widget_key,
 )
 
+Store = ActivationStore | HFActivationStore
+
+DEFAULT_HUB_REPO = os.environ.get(
+    "PERSONA_VECTORS_HUB_REPO",
+    "implicit-personalization/synth-persona-vectors",
+)
+SOURCE_HUB = "Hugging Face Hub"
+SOURCE_LOCAL = "Local activations"
+SOURCES = (SOURCE_HUB, SOURCE_LOCAL)
+
 
 def _filename(*parts: str) -> str:
     return "__".join(slugify(part) for part in parts if part)
 
 
-_list_layers_cached = st.cache_data(show_spinner=False)(list_available_layers)
+_list_layers_cached = st.cache_data(show_spinner=False)(list_local_layers)
 
 # Keep compare-tab selection state separate so projection defaults do not
 # overwrite cosine similarity defaults.
 _LAST_COSINE_PERSONAS_KEY = "compare:last_personas:cosine"
 _LAST_PROJECTION_PERSONAS_KEY = "compare:last_personas:projection"
 _LAST_MASK_STRATEGY_KEY = "compare:last_mask_strategy"
+_LAST_SOURCE_KEY = "compare:last_source"
 
 
 @dataclass(frozen=True)
@@ -51,8 +63,35 @@ class CosineSelection:
     persona_key: str
 
 
+def _store_id(store: Store) -> str:
+    """Stable identifier for cache/widget keys that distinguishes Hub vs local."""
+    if isinstance(store, HFActivationStore):
+        return f"hub:{store.repo_id}"
+    return f"local:{store.root_dir}"
+
+
+def _layers_for_variant(
+    store: Store,
+    variant: str,
+    persona_ids: list[str],
+    mask_strategy: MaskStrategy,
+) -> list[int]:
+    if isinstance(store, HFActivationStore):
+        if not persona_ids:
+            return []
+        sample = store.load(variant, persona_ids[0])
+        return list(range(int(sample.shape[0])))
+    return _list_layers_cached(
+        str(store.root_dir),
+        store.model_name,
+        [variant],
+        persona_ids,
+        mask_strategy=mask_strategy,
+    )
+
+
 def _select_artifact_personas(
-    store: ActivationStore,
+    store: Store,
     variants: list[str],
     mask_strategy: MaskStrategy,
     *,
@@ -61,17 +100,15 @@ def _select_artifact_personas(
     default_all: bool = False,
 ) -> tuple[list[str], dict[str, str]]:
     persona_options = store.list_personas(variants)
-    persona_names = store.persona_names(
-        persona_options,
-        variants=variants,
-    )
+    persona_names = store.persona_names(persona_options, variants=variants)
     if not persona_options:
         if len(variants) > 1:
             st.info(
-                "No personas have saved activations for all selected variants. Run extraction for both variants first."
+                "No personas have vectors for all selected variants. "
+                "Pick a single variant or change the source."
             )
         else:
-            st.info("No personas found for this model yet. Run extraction first.")
+            st.info("No personas found for this model and variant.")
         return [], persona_names
 
     last_personas: list[str] = st.session_state.get(remember_key, [])
@@ -147,19 +184,19 @@ def _render_mask_strategy_select(scope: str) -> MaskStrategy:
         ),
         format_func=lambda strategy: strategy.value.replace("_", " ").title(),
         key=widget_key("load", "mask_strategy", scope),
-        help="Which extracted activation artifact set to load.",
+        help="Which extracted activation set to load.",
     )
     st.session_state[_LAST_MASK_STRATEGY_KEY] = selected.value
     return selected
 
 
 def _render_cosine_selection(
-    store: ActivationStore,
+    store: Store,
     mask_strategy: MaskStrategy,
 ) -> CosineSelection | None:
-    variants = list(store.variants)
+    variants = store.available_variants()
     if len(variants) < 2:
-        st.info("Need at least two non-baseline variants for cosine comparison.")
+        st.info("Need at least two variants with saved vectors for cosine comparison.")
         return None
 
     with st.expander("Vector selection", expanded=True):
@@ -170,7 +207,7 @@ def _render_cosine_selection(
                 options=variants,
                 index=0,
                 format_func=prompt_variant_label,
-                key=widget_key("load", "variant_a"),
+                key=widget_key("load", "variant_a", _store_id(store)),
             )
         with col2:
             variant_b = st.selectbox(
@@ -178,7 +215,7 @@ def _render_cosine_selection(
                 options=variants,
                 index=min(1, len(variants) - 1),
                 format_func=prompt_variant_label,
-                key=widget_key("load", "variant_b"),
+                key=widget_key("load", "variant_b", _store_id(store)),
             )
 
         if variant_a == variant_b:
@@ -189,7 +226,7 @@ def _render_cosine_selection(
             store,
             [variant_a, variant_b],
             mask_strategy,
-            widget_scope="cosine",
+            widget_scope=f"cosine:{_store_id(store)}",
             remember_key=_LAST_COSINE_PERSONAS_KEY,
         )
     if not persona_ids:
@@ -204,11 +241,11 @@ def _render_cosine_selection(
 
 
 def _build_cosine_figures(
-    store: ActivationStore,
+    store: Store,
     selection: CosineSelection,
 ) -> tuple[object, object | None, int, int] | None:
     try:
-        variant_samples = load_variant_mean_samples(
+        variant_samples = load_variant_vectors(
             store,
             [selection.variant_a, selection.variant_b],
             persona_ids=selection.persona_ids,
@@ -242,7 +279,7 @@ def _build_cosine_figures(
             pair_samples = (
                 variant_samples
                 if {left, right} == {selection.variant_a, selection.variant_b}
-                else load_variant_mean_samples(
+                else load_variant_vectors(
                     store,
                     [left, right],
                     persona_ids=selection.persona_ids,
@@ -274,7 +311,7 @@ def _build_cosine_figures(
 
 
 def _render_cosine_similarity(
-    store: ActivationStore,
+    store: Store,
     mask_strategy: MaskStrategy,
 ) -> None:
     selection = _render_cosine_selection(store, mask_strategy)
@@ -284,6 +321,7 @@ def _render_cosine_similarity(
     cosine_fig_key = widget_key(
         "load",
         "cosine_fig_state",
+        _store_id(store),
         store.model_name,
         mask_strategy.value,
         selection.variant_a,
@@ -312,6 +350,7 @@ def _render_cosine_similarity(
         key=widget_key(
             "load",
             "compare_vectors",
+            _store_id(store),
             store.model_name,
             mask_strategy.value,
             selection.variant_a,
@@ -342,27 +381,26 @@ def _render_cosine_similarity(
 
 
 def _select_single_variant_samples(
-    store: ActivationStore,
+    store: Store,
     mask_strategy: MaskStrategy,
     scope: str,
 ) -> tuple[str, list[str], str, list[int]] | None:
-    variants = list(store.variants)
+    variants = store.available_variants()
+    if not variants:
+        st.info("No variants with saved vectors for this model.")
+        return None
     variant = st.selectbox(
         "Variant",
         options=variants,
-        index=(
-            variants.index("biography")
-            if "biography" in variants
-            else 0
-        ),
+        index=variants.index("biography") if "biography" in variants else 0,
         format_func=prompt_variant_label,
-        key=widget_key("load", "variant", scope),
+        key=widget_key("load", "variant", scope, _store_id(store)),
     )
     persona_ids, _ = _select_artifact_personas(
         store,
         [variant],
         mask_strategy,
-        widget_scope=scope,
+        widget_scope=f"{scope}:{_store_id(store)}",
         remember_key=_LAST_PROJECTION_PERSONAS_KEY,
         default_all=True,
     )
@@ -370,13 +408,7 @@ def _select_single_variant_samples(
         return None
 
     persona_key = "_".join(sorted(persona_ids))
-    layer_options = _list_layers_cached(
-        str(store.root_dir),
-        store.model_name,
-        [variant],
-        persona_ids,
-        mask_strategy=mask_strategy,
-    )
+    layer_options = _layers_for_variant(store, variant, persona_ids, mask_strategy)
     if not layer_options:
         st.info("No shared layers are available for the selected personas.")
         return None
@@ -389,6 +421,7 @@ def _select_single_variant_samples(
             "load",
             "layers",
             scope,
+            _store_id(store),
             store.model_name,
             mask_strategy.value,
             variant,
@@ -403,7 +436,7 @@ def _select_single_variant_samples(
 
 
 def _render_layered_figure_analysis(
-    store: ActivationStore,
+    store: Store,
     mask_strategy: MaskStrategy,
     *,
     scope: str,
@@ -425,11 +458,12 @@ def _render_layered_figure_analysis(
     fig_key = widget_key(
         "load",
         f"{scope}_fig_state",
+        _store_id(store),
         store.model_name,
         mask_strategy.value,
         figure_kind,
         variant,
-        "persona_mean",
+        "persona_vector",
         persona_key,
     )
     filename = _filename(
@@ -438,13 +472,13 @@ def _render_layered_figure_analysis(
         store.model_name,
         mask_strategy.value,
         variant,
-        "persona_mean",
+        "persona_vector",
         persona_key,
     )
 
     if st.button(button_label, type="primary"):
         try:
-            samples = load_persona_mean_samples(
+            samples = load_persona_vectors(
                 store,
                 variant,
                 mask_strategy=mask_strategy,
@@ -462,8 +496,7 @@ def _render_layered_figure_analysis(
                     layers=selected_layers,
                     title=(
                         "Pair similarity trajectories - "
-                        f"{prompt_variant_label(variant)} - "
-                        "persona mean activations"
+                        f"{prompt_variant_label(variant)} - persona vectors"
                     ),
                 )
                 if include_pair_trajectories
@@ -488,17 +521,45 @@ def _render_layered_figure_analysis(
         st.success(f"Loaded {n_samples} samples.")
 
 
+def _render_source_select() -> str:
+    last_source = st.session_state.get(_LAST_SOURCE_KEY, SOURCE_HUB)
+    source = st.segmented_control(
+        "Source",
+        options=SOURCES,
+        default=last_source if last_source in SOURCES else SOURCE_HUB,
+        key=widget_key("load", "source"),
+        label_visibility="collapsed",
+    )
+    if source is None:
+        source = SOURCE_HUB
+    st.session_state[_LAST_SOURCE_KEY] = source
+    return source
+
+
+def _build_store(source: str, model_name: str, mask_strategy: MaskStrategy) -> Store:
+    if source == SOURCE_HUB:
+        repo = st.text_input(
+            "Hub repo",
+            value=st.session_state.get("compare:hub_repo", DEFAULT_HUB_REPO),
+            key="compare:hub_repo",
+            help="Hugging Face dataset published by `scripts/push_to_hf.py`.",
+        )
+        return HFActivationStore(repo, model_name, mask_strategy=mask_strategy)
+    artifacts_root = st.text_input(
+        "Artifacts root",
+        value=str(get_artifacts_dir() / "activations"),
+        key="compare:artifacts_root",
+    )
+    return ActivationStore(model_name, artifacts_root, mask_strategy=mask_strategy)
+
+
 def render_compare_tab(model_name: str) -> None:
     """Render the compare tab."""
 
     st.title("Compare")
-    st.caption("Compare saved activations by cosine similarity, PCA, or UMAP.")
+    st.caption("Compare persona vectors by cosine similarity, PCA, or UMAP.")
 
-    with st.expander("Artifact settings", expanded=False):
-        artifacts_root = st.text_input(
-            "Artifacts root",
-            value=str(get_artifacts_dir() / "activations"),
-        )
+    source = _render_source_select()
 
     analysis_mode = st.segmented_control(
         "Analysis mode",
@@ -510,9 +571,10 @@ def render_compare_tab(model_name: str) -> None:
     if analysis_mode is None:
         analysis_mode = ANALYSIS_MODES[0]
     st.caption(ANALYSIS_HELP_TEXT[analysis_mode])
-    with st.expander("Activation settings", expanded=False):
+
+    with st.expander("Source settings", expanded=False):
         mask_strategy = _render_mask_strategy_select(analysis_mode)
-    store = ActivationStore(model_name, artifacts_root, mask_strategy=mask_strategy)
+        store = _build_store(source, model_name, mask_strategy)
 
     if analysis_mode == "Cosine similarity":
         _render_cosine_similarity(store, mask_strategy)
@@ -525,8 +587,7 @@ def render_compare_tab(model_name: str) -> None:
             figure_kind="similarity",
             button_label="Generate similarity matrix",
             title_fn=lambda v: (
-                "Centered similarity - "
-                f"{prompt_variant_label(v)} - persona mean activations"
+                f"Centered similarity - {prompt_variant_label(v)} - persona vectors"
             ),
             include_pair_trajectories=True,
         )
@@ -539,6 +600,6 @@ def render_compare_tab(model_name: str) -> None:
         figure_kind=analysis_mode.lower(),
         button_label=f"Generate {analysis_mode} projection",
         title_fn=lambda v: (
-            f"{analysis_mode} - {prompt_variant_label(v)} - Persona means"
+            f"{analysis_mode} - {prompt_variant_label(v)} - persona vectors"
         ),
     )
