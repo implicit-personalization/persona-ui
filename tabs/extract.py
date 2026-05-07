@@ -1,10 +1,9 @@
 import html
 from dataclasses import dataclass
-from typing import Literal, cast
 
 import streamlit as st
 from persona_data.prompts import format_prompt
-from persona_data.synth_persona import PersonaData, QAPair
+from persona_data.synth_persona import BASELINE_PERSONA_ID, PersonaData, QAPair
 from persona_vectors.artifacts import PERSONA_VARIANTS
 from persona_vectors.extraction import (
     MaskStrategy,
@@ -23,20 +22,13 @@ from utils.helpers import (
 )
 from utils.runtime import cached_model
 
-# Cross-model / remote-switch persistence — same pattern as compare.py.
-# Written on every render so selections survive model or NDIF toggles.
 _LAST_VARIANTS_KEY = "extract:last_variants"
 _LAST_BASELINE_KEY = "extract:last_include_baseline"
 _LAST_PERSONA_IDS_KEY = "extract:last_persona_ids"
-_LAST_QA_TYPE_KEY = "extract:last_qa_type"
-_LAST_ITEM_TYPE_KEY = "extract:last_item_type"
-_LAST_SCOPE_KEY = "extract:last_scope"
 _LAST_MAX_QUESTIONS_KEY = "extract:last_max_questions"
 _LAST_MASK_STRATEGY_KEY = "extract:last_mask_strategy"
 
-_QA_TYPE_OPTIONS = ["all", "explicit", "implicit"]
-_ITEM_TYPE_OPTIONS = ["all", "mcq", "frq"]
-_SCOPE_OPTIONS = ["all", "individual", "shared"]
+_DEFAULT_MAX_QUESTIONS = 50
 
 
 @dataclass(frozen=True)
@@ -44,24 +36,6 @@ class ExtractSettings:
     runs: list[tuple[PersonaData, list[QAPair]]]
     mask_strategy: MaskStrategy
     max_questions: int
-
-
-def _remembered_select(
-    label: str,
-    options: list[str],
-    state_key: str,
-    key: str,
-    default: str = "all",
-) -> str:
-    current = st.session_state.get(state_key, default)
-    selected = st.selectbox(
-        label,
-        options=options,
-        index=options.index(current) if current in options else 0,
-        key=key,
-    )
-    st.session_state[state_key] = selected
-    return selected
 
 
 def _build_run_plan(
@@ -227,57 +201,6 @@ def _render_sample_tokens_html(p, tokenizer, *, max_tokens: int = 200) -> str:
     )
 
 
-def _render_filter_controls(
-    *,
-    model_name: str,
-    remote: bool,
-    dataset_source: str,
-) -> tuple[
-    Literal["explicit", "implicit"] | None,
-    Literal["mcq", "frq"] | None,
-    Literal["individual", "shared"] | None,
-]:
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        qa_type_select = _remembered_select(
-            "QA type",
-            _QA_TYPE_OPTIONS,
-            _LAST_QA_TYPE_KEY,
-            key=_extract_widget_key(model_name, remote, dataset_source, "qa_type_select"),
-        )
-    with col2:
-        item_type_select = _remembered_select(
-            "Item type",
-            _ITEM_TYPE_OPTIONS,
-            _LAST_ITEM_TYPE_KEY,
-            key=_extract_widget_key(
-                model_name,
-                remote,
-                dataset_source,
-                "item_type_select",
-            ),
-        )
-    with col3:
-        scope_select = _remembered_select(
-            "Scope",
-            _SCOPE_OPTIONS,
-            _LAST_SCOPE_KEY,
-            key=_extract_widget_key(model_name, remote, dataset_source, "scope_select"),
-        )
-
-    return (
-        cast(Literal["explicit", "implicit"], qa_type_select)
-        if qa_type_select in ("explicit", "implicit")
-        else None,
-        cast(Literal["mcq", "frq"], item_type_select)
-        if item_type_select in ("mcq", "frq")
-        else None,
-        cast(Literal["individual", "shared"], scope_select)
-        if scope_select in ("individual", "shared")
-        else None,
-    )
-
-
 def _render_mask_strategy_select(
     *,
     model_name: str,
@@ -312,30 +235,24 @@ def _collect_runs(
     *,
     dataset,
     selected_personas: list[PersonaData],
-    qa_filter_type: Literal["explicit", "implicit"] | None,
-    qa_filter_item_type: Literal["mcq", "frq"] | None,
-    qa_filter_scope: Literal["individual", "shared"] | None,
 ) -> list[tuple[PersonaData, list[QAPair]]] | None:
     runs, skipped = [], []
     for persona in selected_personas:
-        qa = list(
-            dataset.get_qa(
-                persona.id,
-                type=qa_filter_type,
-                item_type=qa_filter_item_type,
-                scope=qa_filter_scope,
-            )
-        )
+        if persona.id == BASELINE_PERSONA_ID:
+            qa = list(dataset.get_qa(BASELINE_PERSONA_ID, item_type="mcq", scope="shared"))
+        elif hasattr(dataset, "train_test_split"):
+            qa, _ = dataset.train_test_split(persona.id)
+        else:
+            qa = list(dataset.get_qa(persona.id))
         if qa:
             runs.append((persona, qa))
         else:
             skipped.append(persona)
     if skipped:
         names = ", ".join(p.name for p in skipped)
-        st.warning(f"No QA pairs match filters for: {names}. They will be skipped.")
-
+        st.warning(f"No train QA pairs found for: {names}. They will be skipped.")
     if not runs:
-        st.info("No personas have matching QA pairs. Widen the filters.")
+        st.info("No personas have matching QA pairs.")
         return None
     return runs
 
@@ -348,11 +265,12 @@ def _render_max_questions(
     runs: list[tuple[PersonaData, list[QAPair]]],
 ) -> int:
     max_q = min(len(qa_pairs) for _, qa_pairs in runs)
+    default = min(_DEFAULT_MAX_QUESTIONS, max_q)
     max_questions = st.slider(
-        "Max questions",
+        "Max questions (train split)",
         min_value=1,
         max_value=max_q,
-        value=min(max(st.session_state.get(_LAST_MAX_QUESTIONS_KEY, max_q), 1), max_q),
+        value=min(max(st.session_state.get(_LAST_MAX_QUESTIONS_KEY, default), 1), max_q),
         key=_extract_widget_key(model_name, remote, dataset_source, "max_questions"),
     )
     st.session_state[_LAST_MAX_QUESTIONS_KEY] = max_questions
@@ -361,48 +279,17 @@ def _render_max_questions(
 
 def _render_advanced_settings(
     *,
-    dataset,
-    selected_personas: list[PersonaData],
     model_name: str,
     remote: bool,
     dataset_source: str,
-) -> ExtractSettings | None:
+) -> MaskStrategy:
     with st.expander("Advanced", expanded=False):
-        st.caption("Filters")
-        qa_filter_type, qa_filter_item_type, qa_filter_scope = _render_filter_controls(
-            model_name=model_name,
-            remote=remote,
-            dataset_source=dataset_source,
-        )
-
-        st.caption("Extraction settings")
         mask_strategy = _render_mask_strategy_select(
             model_name=model_name,
             remote=remote,
             dataset_source=dataset_source,
         )
-        runs = _collect_runs(
-            dataset=dataset,
-            selected_personas=selected_personas,
-            qa_filter_type=qa_filter_type,
-            qa_filter_item_type=qa_filter_item_type,
-            qa_filter_scope=qa_filter_scope,
-        )
-        if runs is None:
-            return None
-
-        max_questions = _render_max_questions(
-            model_name=model_name,
-            remote=remote,
-            dataset_source=dataset_source,
-            runs=runs,
-        )
-
-    return ExtractSettings(
-        runs=runs,
-        mask_strategy=mask_strategy,
-        max_questions=max_questions,
-    )
+    return mask_strategy
 
 
 def _render_extract_actions() -> tuple[bool, bool]:
@@ -514,7 +401,7 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
     """Render the extraction tab."""
 
     st.title("Extract")
-    st.caption("Extract per-persona activation vectors from QA pairs.")
+    st.caption("Extract per-persona activation vectors from train QA pairs.")
 
     _render_local_dataset_upload(dataset_source)
     variant_choice = _render_variant_controls(
@@ -540,20 +427,31 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
     if selected_personas is None:
         return
 
-    settings = _render_advanced_settings(
-        dataset=dataset,
-        selected_personas=selected_personas,
+    personas_for_runs = list(selected_personas)
+    baseline = getattr(dataset, "baseline", None)
+    if include_baseline and baseline is not None:
+        personas_for_runs.append(baseline)
+
+    runs = _collect_runs(dataset=dataset, selected_personas=personas_for_runs)
+    if runs is None:
+        return
+
+    max_questions = _render_max_questions(
+        model_name=model_name,
+        remote=remote,
+        dataset_source=dataset_source,
+        runs=runs,
+    )
+    mask_strategy = _render_advanced_settings(
         model_name=model_name,
         remote=remote,
         dataset_source=dataset_source,
     )
-    if settings is None:
-        return
-
-    runs = list(settings.runs)
-    baseline = getattr(dataset, "baseline", None)
-    if include_baseline and baseline is not None and runs:
-        runs.append((baseline, runs[0][1]))
+    settings = ExtractSettings(
+        runs=runs,
+        mask_strategy=mask_strategy,
+        max_questions=max_questions,
+    )
 
     run_clicked, preview_clicked = _render_extract_actions()
     run_plan = _build_run_plan(selected_variants, runs)
