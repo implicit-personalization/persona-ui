@@ -17,24 +17,10 @@ from .helpers import DATASET_SOURCES
 
 
 @st.cache_resource(show_spinner=False)
-def cached_hf_dataset() -> SynthPersonaDataset:
-    """Load the default SynthPersona HuggingFace dataset once."""
+def _cached_dataset(cls: type) -> Any:
+    """Instantiate and cache a HuggingFace dataset class once per session."""
 
-    return SynthPersonaDataset()
-
-
-@st.cache_resource(show_spinner=False)
-def cached_nemotron_dataset() -> NemotronPersonasFranceDataset:
-    """Load the Nemotron France HuggingFace dataset once."""
-
-    return NemotronPersonasFranceDataset()
-
-
-@st.cache_resource(show_spinner=False)
-def cached_nemotron_usa_dataset() -> NemotronPersonasUSADataset:
-    """Load the Nemotron USA HuggingFace dataset once."""
-
-    return NemotronPersonasUSADataset()
+    return cls()
 
 
 def _upload_cache_dir() -> Path:
@@ -74,13 +60,13 @@ def load_dataset(
     """Load the selected dataset source for the UI."""
 
     if dataset_source == DATASET_SOURCES[0]:
-        return cached_hf_dataset(), "SynthPersona"
+        return _cached_dataset(SynthPersonaDataset), "SynthPersona"
 
     if dataset_source == DATASET_SOURCES[1]:
-        return cached_nemotron_dataset(), "Nemotron France"
+        return _cached_dataset(NemotronPersonasFranceDataset), "Nemotron France"
 
     if dataset_source == DATASET_SOURCES[2]:
-        return cached_nemotron_usa_dataset(), "Nemotron USA"
+        return _cached_dataset(NemotronPersonasUSADataset), "Nemotron USA"
 
     if personas_file is None or qa_file is None:
         raise ValueError("Upload both personas.jsonl and qa.jsonl files")

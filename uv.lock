@@ -1120,11 +1120,11 @@ wheels = [
 
 [[package]]
 name = "narwhals"
-version = "2.20.0"
+version = "2.21.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e9/f3/257adc69a71011b4c8cda321b00f02c5bf1980ae38ffd05a58d9632d4de8/narwhals-2.20.0.tar.gz", hash = "sha256:c10994975fa7dc5a68c2cffcddbd5908fc8ebb2d463c5bab085309c0ee1f551e", size = 627848, upload-time = "2026-04-20T12:11:45.427Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2d/0e/3ad61eb87088cc4932e0d851531fa82f845a6230b68b091a0e298cc7e537/narwhals-2.21.0.tar.gz", hash = "sha256:7c6e7f50528e62b7a967dd864d7e117d2955d38d4f730653ce46a9861358e2dc", size = 633083, upload-time = "2026-05-08T12:29:02.587Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d0/69/f24d3d1c38ad69e256138b4ec2452a8c7cf66be49dc214771ae99dd4f0a0/narwhals-2.20.0-py3-none-any.whl", hash = "sha256:16e750ea5507d4ba6e8d03455b5f93a535e0405976561baea235bca5dc9f475d", size = 449373, upload-time = "2026-04-20T12:11:43.596Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/e1/68c2256b69a314eba133673377ba9118c356f6342a0c02b61de449cf2bf2/narwhals-2.21.0-py3-none-any.whl", hash = "sha256:1e6617d0fca68ae1fda29e5397c4eaacd3ffc9fffe6bcd6ded0c690475e853be", size = 451943, upload-time = "2026-05-08T12:29:01.058Z" },
 ]
 
 [[package]]
@@ -1550,7 +1550,7 @@ wheels = [
 
 [[package]]
 name = "persona-data"
-version = "0.4.1"
+version = "0.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -1559,9 +1559,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "torch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d5/9b/b9bc22cf6393cbd38529dfdc1128963c2935060f96b6896b81349bd34050/persona_data-0.4.1.tar.gz", hash = "sha256:1e98a8999f498f95eeaaa4f46931818b2b1296b5ad500a89c7ad1e87b5aa405f", size = 9294, upload-time = "2026-05-07T10:27:00.746Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/2f/099a74e54846172a20b697b46b285eb2f0004e1db530308d6b4ff1f19079/persona_data-0.4.2.tar.gz", hash = "sha256:7870292a79b3943a77c31595140de3b2243b783222590248d09891de70e7fe1b", size = 9276, upload-time = "2026-05-08T13:59:27.58Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/a9/10a586bfb4a585931dbc0f657c71a35946880cbb7b25316594042cc1a00a/persona_data-0.4.1-py3-none-any.whl", hash = "sha256:53780689988e487b68d826c0cd980dfe6bb13a340e01a10c042e4dc86f46e765", size = 11937, upload-time = "2026-05-07T10:26:59.865Z" },
+    { url = "https://files.pythonhosted.org/packages/57/03/e76a48b41ee00684a4430269007e217e70f59e2597d7c862d93cfc5ac78b/persona_data-0.4.2-py3-none-any.whl", hash = "sha256:c881d6fb71af87a6fa773284076e4cb55794db6dc447a7eb0047eee2b389c855", size = 11914, upload-time = "2026-05-08T13:59:28.198Z" },
 ]
 
 [[package]]
@@ -1578,8 +1578,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "persona-data", specifier = ">=0.4.1" },
-    { name = "persona-vectors", specifier = ">=0.6.1" },
+    { name = "persona-data", specifier = ">=0.4.2" },
+    { name = "persona-vectors", specifier = ">=0.6.3" },
     { name = "plotly", specifier = ">=6.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "streamlit", specifier = ">=1.44.0" },
@@ -1587,7 +1587,7 @@ requires-dist = [
 
 [[package]]
 name = "persona-vectors"
-version = "0.6.1"
+version = "0.6.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "datasets" },
@@ -1606,9 +1606,9 @@ dependencies = [
     { name = "transformers" },
     { name = "umap-learn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/69/f3/6da35af90c8ea5333db1763ece04a3230353ac5a76c0dc8fea705a6e86cf/persona_vectors-0.6.1.tar.gz", hash = "sha256:552ac9a0d739a453c5d9eb612cb0d0d2820a1b53ce84f490295a84105a71f7cc", size = 24311, upload-time = "2026-05-07T15:07:29.951Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/42/f5/57836026dc1b8c716ff6e443ba3cc8fafef108078e52f872c101f66ab61c/persona_vectors-0.6.3.tar.gz", hash = "sha256:2389aaa4ab5e83c4541556a000e0268ad3f1f2d5e741ade9830cb3da972332c5", size = 24509, upload-time = "2026-05-08T14:10:37.09Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/86/66/91df378258e2c0cbc7860652b07b5e65ee1949ba14be2efdb6c646a933f1/persona_vectors-0.6.1-py3-none-any.whl", hash = "sha256:593977ad19c9f23df7d86e302fe4bcf49159425da67d83281a11858026c5e85e", size = 28683, upload-time = "2026-05-07T15:07:30.791Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/92/912d2a6998bcc103631597125bad5b5644c981b52e62fff229aee64139ae/persona_vectors-0.6.3-py3-none-any.whl", hash = "sha256:9a7f275c7e58990e1228a0d35ca2a8898eb8330fd4a9a627fb28fc574883d260", size = 29366, upload-time = "2026-05-08T14:10:38.184Z" },
 ]
 
 [[package]]
@@ -2912,11 +2912,11 @@ wheels = [
 
 [[package]]
 name = "urllib3"
-version = "2.6.3"
+version = "2.7.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c7/24/5f1b3bdffd70275f6661c76461e25f024d5a38a46f04aaca912426a2b1d3/urllib3-2.6.3.tar.gz", hash = "sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed", size = 435556, upload-time = "2026-01-07T16:24:43.925Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/53/0c/06f8b233b8fd13b9e5ee11424ef85419ba0d8ba0b3138bf360be2ff56953/urllib3-2.7.0.tar.gz", hash = "sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c", size = 433602, upload-time = "2026-05-07T16:13:18.596Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/39/08/aaaad47bc4e9dc8c725e68f9d04865dbcb2052843ff09c97b08904852d84/urllib3-2.6.3-py3-none-any.whl", hash = "sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4", size = 131584, upload-time = "2026-01-07T16:24:42.685Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897", size = 131087, upload-time = "2026-05-07T16:13:17.151Z" },
 ]
 
 [[package]]

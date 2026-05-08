@@ -16,6 +16,64 @@ _TABS = ["Chat", "Compare", "Extract"]
 _TAB_ICONS = [":material/chat:", ":material/search:", ":material/tune:"]
 
 
+def _remote_model_input(remote_models: list[str]) -> str:
+    """Return the active remote model id, picking from running NDIF deployments or a custom value."""
+
+    last_remote = st.session_state.get(_LAST_REMOTE_MODEL_KEY, REMOTE_DEFAULT_MODEL)
+
+    if not remote_models:
+        st.warning("No running NDIF models found.")
+        model_name = st.text_input(
+            "Model",
+            value=st.session_state.get(
+                "sidebar__remote_model_custom_value", last_remote
+            ),
+            key="sidebar__remote_model_custom_value",
+            help="NDIF model id. Use this to cold-load a remote model.",
+        )
+        st.session_state[_LAST_REMOTE_MODEL_KEY] = model_name
+        return model_name
+
+    custom = st.toggle(
+        "Custom remote model",
+        value=False,
+        key="sidebar__remote_model_custom_enabled",
+        help="Enter any NDIF-loadable model id, even if it is not currently running.",
+    )
+    if custom:
+        model_name = st.text_input(
+            "Model",
+            value=st.session_state.get(
+                "sidebar__remote_model_custom_value", last_remote
+            ),
+            key="sidebar__remote_model_custom_value",
+            help="NDIF model id. Example: openai/gpt-oss-20b",
+        )
+        st.caption(
+            f"{len(remote_models)} running NDIF model(s) detected. "
+            "Custom model ids can cold-load if your NDIF account allows it."
+        )
+    else:
+        default_model = st.session_state.get("sidebar__remote_model", last_remote)
+        if default_model not in remote_models:
+            default_model = (
+                REMOTE_DEFAULT_MODEL
+                if REMOTE_DEFAULT_MODEL in remote_models
+                else remote_models[0]
+            )
+        if st.session_state.get("sidebar__remote_model") not in remote_models:
+            st.session_state["sidebar__remote_model"] = default_model
+        model_name = st.selectbox(
+            "Model",
+            options=remote_models,
+            index=remote_models.index(default_model),
+            key="sidebar__remote_model",
+            help="Running NDIF model.",
+        )
+    st.session_state[_LAST_REMOTE_MODEL_KEY] = model_name
+    return model_name
+
+
 def _sidebar_controls() -> tuple[bool, str, str, str]:
     from utils.runtime import list_remote_models
 
@@ -44,68 +102,7 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
         remote = st.toggle("Remote (NDIF)", value=False, key="sidebar__remote")
 
         if remote:
-            remote_models = list_remote_models()
-            custom_remote_key = "sidebar__remote_model_custom_enabled"
-            custom_remote_model = st.toggle(
-                "Custom remote model",
-                value=False,
-                key=custom_remote_key,
-                help="Enter any NDIF-loadable model id, even if it is not currently running.",
-            )
-            if remote_models:
-                if custom_remote_model:
-                    model_name = st.text_input(
-                        "Model",
-                        value=st.session_state.get(
-                            "sidebar__remote_model_custom_value",
-                            st.session_state.get(
-                                _LAST_REMOTE_MODEL_KEY, REMOTE_DEFAULT_MODEL
-                            ),
-                        ),
-                        key="sidebar__remote_model_custom_value",
-                        help="NDIF model id. Example: openai/gpt-oss-20b",
-                    )
-                    st.caption(
-                        f"{len(remote_models)} running NDIF model(s) detected. Custom model ids can cold-load if your NDIF account allows it."
-                    )
-                else:
-                    default_model = st.session_state.get(
-                        "sidebar__remote_model",
-                        st.session_state.get(_LAST_REMOTE_MODEL_KEY),
-                    )
-                    if default_model not in remote_models:
-                        default_model = (
-                            REMOTE_DEFAULT_MODEL
-                            if REMOTE_DEFAULT_MODEL in remote_models
-                            else remote_models[0]
-                        )
-                    if (
-                        st.session_state.get("sidebar__remote_model")
-                        not in remote_models
-                    ):
-                        st.session_state["sidebar__remote_model"] = default_model
-                    selected_remote_model = st.selectbox(
-                        "Model",
-                        options=remote_models,
-                        index=remote_models.index(default_model),
-                        key="sidebar__remote_model",
-                        help="Running NDIF model.",
-                    )
-                    model_name = selected_remote_model
-            else:
-                st.warning("No running NDIF models found.")
-                model_name = st.text_input(
-                    "Model",
-                    value=st.session_state.get(
-                        "sidebar__remote_model_custom_value",
-                        st.session_state.get(
-                            _LAST_REMOTE_MODEL_KEY, REMOTE_DEFAULT_MODEL
-                        ),
-                    ),
-                    key="sidebar__remote_model_custom_value",
-                    help="NDIF model id. Use this to cold-load a remote model.",
-                )
-            st.session_state[_LAST_REMOTE_MODEL_KEY] = model_name
+            model_name = _remote_model_input(list_remote_models())
         else:
             model_name = st.text_input(
                 "Model",

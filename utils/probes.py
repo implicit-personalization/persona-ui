@@ -225,15 +225,28 @@ def _load_probe_payload(
         num_classes=num_classes,
     )
     labels = _normalize_labels(payload.get("idx_to_label"), num_classes)
+
+    raw_layer = payload.get("layer")
+    try:
+        layer = int(raw_layer) if raw_layer is not None else metadata.layer
+    except (TypeError, ValueError):
+        layer = metadata.layer
+    raw_location = payload.get("location")
+    location = (
+        raw_location
+        if isinstance(raw_location, str) and raw_location
+        else metadata.location
+    )
+
     return LoadedProbe(
         model=model,
         input_dim=input_dim,
         labels=labels,
         model_type=str(payload.get("model_type") or metadata.model_type),
-        layer=_coerce_optional_int(payload.get("layer"), metadata.layer),
-        location=_coerce_location(payload.get("location"), metadata.location),
-        scaler_mean=_coerce_tensor(payload.get("scaler_mean")),
-        scaler_std=_coerce_tensor(payload.get("scaler_std")),
+        layer=layer,
+        location=location,
+        scaler_mean=_as_cpu_tensor(payload.get("scaler_mean")),
+        scaler_std=_as_cpu_tensor(payload.get("scaler_std")),
     )
 
 
@@ -296,7 +309,9 @@ def _coerce_probe_dim(
     weights = [
         tensor
         for key, tensor in state_dict.items()
-        if key.endswith("weight") and isinstance(tensor, torch.Tensor) and tensor.ndim == 2
+        if key.endswith("weight")
+        and isinstance(tensor, torch.Tensor)
+        and tensor.ndim == 2
     ]
     if not weights:
         raise ValueError(f"Cannot infer probe {dim} dimension from state dict")
@@ -349,25 +364,10 @@ def _coerce_hidden_dims(value: Any) -> list[int]:
     raise TypeError(f"Unsupported hidden_dims value: {type(value)!r}")
 
 
-def _coerce_tensor(value: Any) -> torch.Tensor | None:
-    if value is None or not isinstance(value, torch.Tensor):
+def _as_cpu_tensor(value: Any) -> torch.Tensor | None:
+    if not isinstance(value, torch.Tensor):
         return None
     return value.detach().cpu()
-
-
-def _coerce_optional_int(value: Any, fallback: int | None) -> int | None:
-    if value is None:
-        return fallback
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return fallback
-
-
-def _coerce_location(value: Any, fallback: str | None) -> str | None:
-    if isinstance(value, str) and value:
-        return value
-    return fallback
 
 
 def _normalize_labels(raw_labels: Any, num_classes: int) -> list[str | None]:

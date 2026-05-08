@@ -102,7 +102,9 @@ def _render_variant_controls(
     return selected_variants, include_baseline
 
 
-def _load_qa_dataset_personas(dataset_source: str) -> tuple[object, list[PersonaData]] | None:
+def _load_qa_dataset_personas(
+    dataset_source: str,
+) -> tuple[object, list[PersonaData]] | None:
     try:
         dataset, dataset_status = load_dataset(
             dataset_source,
@@ -237,7 +239,9 @@ def _collect_runs(
     runs, skipped = [], []
     for persona in selected_personas:
         if persona.id == BASELINE_PERSONA_ID:
-            qa = list(dataset.get_qa(BASELINE_PERSONA_ID, item_type="mcq", scope="shared"))
+            qa = list(
+                dataset.get_qa(BASELINE_PERSONA_ID, item_type="mcq", scope="shared")
+            )
         elif hasattr(dataset, "train_test_split"):
             qa, _ = dataset.train_test_split(persona.id)
         else:
@@ -268,26 +272,13 @@ def _render_max_questions(
         "Max questions (train split)",
         min_value=1,
         max_value=max_q,
-        value=min(max(st.session_state.get(_LAST_MAX_QUESTIONS_KEY, default), 1), max_q),
+        value=min(
+            max(st.session_state.get(_LAST_MAX_QUESTIONS_KEY, default), 1), max_q
+        ),
         key=_extract_widget_key(model_name, remote, dataset_source, "max_questions"),
     )
     st.session_state[_LAST_MAX_QUESTIONS_KEY] = max_questions
     return max_questions
-
-
-def _render_advanced_settings(
-    *,
-    model_name: str,
-    remote: bool,
-    dataset_source: str,
-) -> MaskStrategy:
-    with st.expander("Advanced", expanded=False):
-        mask_strategy = _render_mask_strategy_select(
-            model_name=model_name,
-            remote=remote,
-            dataset_source=dataset_source,
-        )
-    return mask_strategy
 
 
 def _render_extract_actions() -> tuple[bool, bool]:
@@ -439,11 +430,12 @@ def render_extract_tab(remote: bool, model_name: str, dataset_source: str) -> No
         dataset_source=dataset_source,
         runs=runs,
     )
-    mask_strategy = _render_advanced_settings(
-        model_name=model_name,
-        remote=remote,
-        dataset_source=dataset_source,
-    )
+    with st.expander("Advanced", expanded=False):
+        mask_strategy = _render_mask_strategy_select(
+            model_name=model_name,
+            remote=remote,
+            dataset_source=dataset_source,
+        )
     settings = ExtractSettings(
         mask_strategy=mask_strategy,
         max_questions=max_questions,

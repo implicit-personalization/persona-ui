@@ -5,10 +5,7 @@ from itertools import combinations
 
 import streamlit as st
 from persona_data.environment import get_artifacts_dir
-from persona_vectors.analysis import (
-    load_persona_vectors,
-    load_variant_vectors,
-)
+from persona_vectors.analysis import load_persona_vectors, load_variant_vectors
 from persona_vectors.artifacts import ActivationStore, HFActivationStore
 from persona_vectors.artifacts import list_layers as list_local_layers
 from persona_vectors.extraction import MaskStrategy

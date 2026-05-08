@@ -7,7 +7,7 @@ import streamlit as st
 import torch
 from nnterp import StandardizedTransformer
 
-from utils.chat import format_generation_prompt
+from utils.chat import decode_token, format_generation_prompt, resolve_saved_tensor
 
 _TRACE_CACHE_KEY = "probe:trace_cache"
 _MAX_CACHED_TRACES = 3
@@ -74,8 +74,8 @@ def trace_conversation(
         saved_ids = model.input_ids[0].detach().cpu().save()
         saved_acts = accessor[layer][0].detach().float().cpu().save()
 
-    input_ids = _resolve_saved_tensor(saved_ids)
-    activations = _resolve_saved_tensor(saved_acts)
+    input_ids = resolve_saved_tensor(saved_ids)
+    activations = resolve_saved_tensor(saved_acts)
     if input_ids.ndim != 1:
         raise ValueError(
             f"Expected traced input ids to be [seq], got {tuple(input_ids.shape)}"
@@ -125,17 +125,6 @@ def vectorize_token(
     )
 
 
-def decode_token(tokenizer: object, token_id: int) -> str:
-    try:
-        return tokenizer.decode(
-            [token_id],
-            skip_special_tokens=False,
-            clean_up_tokenization_spaces=False,
-        )
-    except TypeError:
-        return tokenizer.decode([token_id], skip_special_tokens=False)
-
-
 def _select_accessor(model: StandardizedTransformer, location: str):
     normalized = location.lower()
     if normalized in {"pre_reasoning", "pre", "input", "layers_input"}:
@@ -143,13 +132,6 @@ def _select_accessor(model: StandardizedTransformer, location: str):
     if normalized in {"post_reasoning", "post", "output", "layers_output"}:
         return model.layers_output
     raise ValueError(f"Unsupported trace location: {location!r}")
-
-
-def _resolve_saved_tensor(value) -> torch.Tensor:
-    resolved = value.value if getattr(value, "value", None) is not None else value
-    if not isinstance(resolved, torch.Tensor):
-        raise TypeError(f"Trace result did not resolve to a tensor: {type(resolved)!r}")
-    return resolved.detach().cpu()
 
 
 def _trace_cache_key(

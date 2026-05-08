@@ -17,7 +17,7 @@ from html import escape
 import torch
 from nnterp import StandardizedTransformer
 
-from utils.chat import format_generation_prompt
+from utils.chat import decode_token, format_generation_prompt, resolve_saved_tensor
 
 
 @dataclass
@@ -41,18 +41,6 @@ def _normalise_diffs(diffs: torch.Tensor) -> list[float]:
         return diffs.tolist()
     clip_val = max(torch.quantile(diffs.abs(), 0.95).item(), 0.3)
     return (diffs.float().clamp(-clip_val, clip_val) / clip_val).tolist()
-
-
-def _decode_ids(tokenizer: object, ids: list[int]) -> str:
-    """Decode token IDs, falling back when clean_up_tokenization_spaces is unsupported."""
-    try:
-        return tokenizer.decode(
-            ids,
-            skip_special_tokens=False,
-            clean_up_tokenization_spaces=False,
-        )
-    except TypeError:
-        return tokenizer.decode(ids, skip_special_tokens=False)
 
 
 def _strip_special_ids(
@@ -96,17 +84,12 @@ def _build_contrast(
     display_ids, keep_mask = _strip_special_ids(response_ids, tokenizer)
     display_diffs = diffs[keep_mask]
     return TokenContrast(
-        tokens=[_token_display(tokenizer, tid.item()) for tid in display_ids],
+        tokens=[decode_token(tokenizer, tid.item()) for tid in display_ids],
         weights=_normalise_diffs(display_diffs),
         raw_diffs=display_diffs.float().tolist(),
         label_a=label_a,
         label_b=label_b,
     )
-
-
-def _token_display(tokenizer: object, token_id: int) -> str:
-    """Render a single token id as normal decoded text."""
-    return _decode_ids(tokenizer, [token_id])
 
 
 # Each spec: (key, input_ids, n_ctx, n_resp, target_ids).
@@ -140,14 +123,7 @@ def _score_passes(
             targets = target_ids.to(log_probs.device).view(-1, 1)
             picked = log_probs.gather(1, targets).view(-1)
             out = picked.detach().cpu().save()
-
-        if getattr(out, "value", None) is not None:
-            out = out.value
-        if not isinstance(out, torch.Tensor):
-            raise TypeError(
-                f"contrast score did not resolve to a tensor: {type(out)!r}"
-            )
-        return out.detach().cpu()
+        return resolve_saved_tensor(out)
 
     return {
         key: _score_pass(input_ids, n_ctx, n_resp, target_ids)

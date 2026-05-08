@@ -1,5 +1,6 @@
-import streamlit as st
 from typing import Literal, NotRequired, TypedDict
+
+import streamlit as st
 
 _CHAT_STATE_PREFIX = "chat_state::"
 PendingChatAction = Literal["new_user_prompt", "regenerate_after_edit"]
@@ -50,9 +51,7 @@ def reset_chat_context_state(
         st.session_state.pop(key, None)
 
 
-def get_chat_state(
-    model_name: str, remote: bool, dataset_source: str
-) -> ChatState:
+def get_chat_state(model_name: str, remote: bool, dataset_source: str) -> ChatState:
     """Return the mutable chat state for the active context."""
 
     key = chat_session_key(model_name, dataset_source)

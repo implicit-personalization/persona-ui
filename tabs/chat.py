@@ -128,8 +128,6 @@ def _handle_single_chat_generation(
     st.rerun()
 
 
-
-
 def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     """Render the chat tab."""
 

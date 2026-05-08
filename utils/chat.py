@@ -74,9 +74,7 @@ def _format_plain_messages(
         else:
             lines.append(f"{role.title()}: {content}")
 
-    if add_generation_prompt and (
-        not lines or not lines[-1].startswith("Assistant:")
-    ):
+    if add_generation_prompt and (not lines or not lines[-1].startswith("Assistant:")):
         lines.append("Assistant:")
 
     return "\n\n".join(lines)
@@ -128,6 +126,26 @@ def format_generation_prompt(
 
     prompt_token_count = tokenizer(prompt, return_tensors="pt").input_ids.shape[1]
     return prompt, prompt_token_count
+
+
+def resolve_saved_tensor(value: object) -> torch.Tensor:
+    """Resolve an nnsight ``.save()`` proxy (or raw tensor) to a CPU tensor."""
+    resolved = value.value if getattr(value, "value", None) is not None else value
+    if not isinstance(resolved, torch.Tensor):
+        raise TypeError(f"Trace result did not resolve to a tensor: {type(resolved)!r}")
+    return resolved.detach().cpu()
+
+
+def decode_token(tokenizer: object, token_id: int) -> str:
+    """Decode a single token id, falling back when ``clean_up_tokenization_spaces`` is unsupported."""
+    try:
+        return tokenizer.decode(
+            [token_id],
+            skip_special_tokens=False,
+            clean_up_tokenization_spaces=False,
+        )
+    except TypeError:
+        return tokenizer.decode([token_id], skip_special_tokens=False)
 
 
 @contextmanager

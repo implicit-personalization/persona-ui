@@ -269,76 +269,46 @@ def render_chat_message(
 ) -> None:
     if not message.get("content"):
         return
-    role = message["role"]
     contrast: TokenContrast | None = message.get("_contrast") if show_contrast else None
-    with st.chat_message(role):
+    with st.chat_message(message["role"]):
         if contrast is not None:
             st.html(render_contrast_html(contrast))
         else:
             st.markdown(message["content"])
 
 
-def _render_editable_message(
-    message: dict[str, str],
-    msg_index: int,
+def render_chat_window(
+    *,
+    chat_log: Any,
     messages: list[dict[str, str]],
     chat_state: dict[str, object],
     edit_key: str,
     pending_key: str,
     show_contrast: bool = False,
-    column_ratio: tuple[int, int] = (25, 1),
-) -> None:
-    if not message.get("content"):
-        return
-    role = message["role"]
-    contrast: TokenContrast | None = message.get("_contrast") if show_contrast else None
-    msg_col, edit_col = st.columns(
-        list(column_ratio), gap="xsmall", vertical_alignment="center"
-    )
-
-    with msg_col:
-        with st.chat_message(role):
-            if contrast is not None:
-                st.html(render_contrast_html(contrast))
-            else:
-                st.markdown(message["content"])
-    with edit_col:
-        if st.button(
-            "", icon=":material/edit:", key=f"{edit_key}_edit_{msg_index}", help="Edit"
-        ):
-            _open_edit_dialog(
-                msg_index=msg_index,
-                messages=messages,
-                chat_state=chat_state,
-                pending_key=pending_key,
-            )
-
-
-def render_chat_window(
-    *,
-    chat_log: Any,
-    messages: list[dict[str, str]],
-    chat_state: dict[str, object] | None = None,
-    edit_key: str | None = None,
-    pending_key: str | None = None,
-    show_contrast: bool = False,
     edit_column_ratio: tuple[int, int] = (25, 1),
 ) -> None:
     with chat_log:
         for i, message in enumerate(messages):
-            if edit_key and pending_key and chat_state is not None:
-                _render_editable_message(
-                    message,
-                    i,
-                    messages,
-                    chat_state,
-                    edit_key,
-                    pending_key,
-                    show_contrast=show_contrast,
-                    column_ratio=edit_column_ratio,
-                )
-            else:
+            if not message.get("content"):
+                continue
+            msg_col, edit_col = st.columns(
+                list(edit_column_ratio), gap="xsmall", vertical_alignment="center"
+            )
+            with msg_col:
                 render_chat_message(message, show_contrast=show_contrast)
+            with edit_col:
+                if st.button(
+                    "",
+                    icon=":material/edit:",
+                    key=f"{edit_key}_edit_{i}",
+                    help="Edit",
+                ):
+                    _open_edit_dialog(
+                        msg_index=i,
+                        messages=messages,
+                        chat_state=chat_state,
+                        pending_key=pending_key,
+                    )
 
 
 def _assistant_first(personas: list[PersonaData]) -> list[PersonaData]:
