@@ -10,6 +10,7 @@ dependencies = [
     "streamlit>=1.44.0",
     "plotly>=6.6.0",
     "python-dotenv>=1.2.2",
+    "catppuccin>=2.5.0",
 ]
 
 # Local development:

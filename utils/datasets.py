@@ -23,6 +23,13 @@ def _cached_dataset(cls: type) -> Any:
     return cls()
 
 
+@st.cache_resource(show_spinner=False)
+def _cached_local_dataset(personas_path: str, qa_path: str) -> LocalPersonaDataset:
+    """Instantiate and cache a local upload dataset for stable temp paths."""
+
+    return LocalPersonaDataset(personas_path=Path(personas_path), qa_path=Path(qa_path))
+
+
 def _upload_cache_dir() -> Path:
     cache_dir = st.session_state.get("_upload_cache_dir")
     if cache_dir is None:
@@ -35,14 +42,12 @@ def _upload_cache_dir() -> Path:
 
 def _uploaded_file_to_temp_path(uploaded_file: Any, stem: str) -> Path:
     suffix = Path(uploaded_file.name).suffix or ".jsonl"
-    temp_path = _upload_cache_dir() / f"{stem}{suffix}"
-    hash_path = temp_path.with_suffix(temp_path.suffix + ".sha256")
     data = uploaded_file.getvalue()
     digest = hashlib.sha256(data).hexdigest()
-    if temp_path.exists() and hash_path.exists() and hash_path.read_text() == digest:
+    temp_path = _upload_cache_dir() / f"{stem}_{digest[:16]}{suffix}"
+    if temp_path.exists():
         return temp_path
     temp_path.write_bytes(data)
-    hash_path.write_text(digest)
     return temp_path
 
 
@@ -95,7 +100,4 @@ def load_dataset(
 
     personas_path = _uploaded_file_to_temp_path(personas_file, stem="personas")
     qa_path = _uploaded_file_to_temp_path(qa_file, stem="qa")
-    return (
-        LocalPersonaDataset(personas_path=personas_path, qa_path=qa_path),
-        "Local upload",
-    )
+    return _cached_local_dataset(str(personas_path), str(qa_path)), "Local upload"

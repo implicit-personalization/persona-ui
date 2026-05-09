@@ -42,6 +42,24 @@ def _filename(*parts: str) -> str:
 
 _list_layers_cached = st.cache_data(show_spinner=False)(list_local_layers)
 
+
+@st.cache_data(show_spinner=False)
+def _hub_layers_cached(
+    repo_id: str,
+    model_name: str,
+    mask_strategy_value: str,
+    variant: str,
+    persona_id: str,
+) -> list[int]:
+    store = HFActivationStore(
+        repo_id,
+        model_name,
+        mask_strategy=MaskStrategy(mask_strategy_value),
+    )
+    sample = store.load(variant, persona_id)
+    return list(range(int(sample.shape[0])))
+
+
 # Keep compare-tab selection state separate so projection defaults do not
 # overwrite cosine similarity defaults.
 _LAST_COSINE_PERSONAS_KEY = "compare:last_personas:cosine"
@@ -75,8 +93,13 @@ def _layers_for_variant(
     if isinstance(store, HFActivationStore):
         if not persona_ids:
             return []
-        sample = store.load(variant, persona_ids[0])
-        return list(range(int(sample.shape[0])))
+        return _hub_layers_cached(
+            store.repo_id,
+            store.model_name,
+            mask_strategy.value,
+            variant,
+            persona_ids[0],
+        )
     return _list_layers_cached(
         str(store.root_dir),
         store.model_name,
@@ -234,12 +257,20 @@ def _build_cosine_figures(
     store: Store,
     selection: CosineSelection,
 ) -> tuple[object, object | None, int, int] | None:
+    variant_sample_cache = {}
+
+    def _load_pair(left: str, right: str):
+        key = tuple(sorted((left, right)))
+        if key not in variant_sample_cache:
+            variant_sample_cache[key] = load_variant_vectors(
+                store,
+                [left, right],
+                persona_ids=selection.persona_ids,
+            )
+        return variant_sample_cache[key]
+
     try:
-        variant_samples = load_variant_vectors(
-            store,
-            [selection.variant_a, selection.variant_b],
-            persona_ids=selection.persona_ids,
-        )
+        variant_samples = _load_pair(selection.variant_a, selection.variant_b)
     except Exception as exc:
         st.error(f"Could not load vectors: {exc}")
         return None
@@ -266,15 +297,7 @@ def _build_cosine_figures(
     pair_errors = []
     for left, right in combinations(selection.variants, 2):
         try:
-            pair_samples = (
-                variant_samples
-                if {left, right} == {selection.variant_a, selection.variant_b}
-                else load_variant_vectors(
-                    store,
-                    [left, right],
-                    persona_ids=selection.persona_ids,
-                )
-            )
+            pair_samples = _load_pair(left, right)
             pair_traces.append(
                 (
                     f"{prompt_variant_label(left)} vs {prompt_variant_label(right)}",

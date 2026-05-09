@@ -1,5 +1,4 @@
 import os
-import threading
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -15,22 +14,6 @@ _LAST_REMOTE_MODEL_KEY = "sidebar:last_remote_model"
 
 _TABS = ["Chat", "Compare", "Extract"]
 _TAB_ICONS = [":material/chat:", ":material/search:", ":material/tune:"]
-
-
-def _preload_default_model() -> None:
-    """Background-warm the default local model so the first chat is instant."""
-    try:
-        import torch
-
-        torch.set_grad_enabled(False)
-        from utils.runtime import cached_model
-
-        cached_model(DEFAULT_MODEL)
-    except Exception:
-        pass
-
-
-threading.Thread(target=_preload_default_model, daemon=True).start()
 
 
 def _remote_model_input(remote_models: list[str]) -> str:
@@ -142,13 +125,17 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
 def main() -> None:
     """Run the Streamlit app."""
 
+    st.set_page_config(page_title="Persona UI", layout="wide")
+    from utils.theme import install_catppuccin_theme
+
+    install_catppuccin_theme(st.get_option("theme.base"))
+
     # Deferred: importing torch is slow; keep it after dotenv load (done at
     # module level above) so the Streamlit page config renders immediately.
     import torch
 
     torch.set_grad_enabled(False)
 
-    st.set_page_config(page_title="Persona UI", layout="wide")
     remote, model_name, dataset_source, active_tab = _sidebar_controls()
 
     if active_tab == "Extract":

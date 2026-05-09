@@ -12,7 +12,7 @@ from persona_vectors.extraction import (
 )
 from persona_vectors.preview import TokenSegment, preview_token_segments
 
-from utils.datasets import load_dataset
+from utils.datasets import load_dataset, load_persona_list
 from utils.helpers import (
     NDIF_STATUS_ICONS,
     persona_label,
@@ -111,6 +111,11 @@ def _load_qa_dataset_personas(
             personas_file=st.session_state.get("extract__personas_file"),
             qa_file=st.session_state.get("extract__qa_file"),
         )
+        personas, _ = load_persona_list(
+            dataset_source,
+            personas_file=st.session_state.get("extract__personas_file"),
+            qa_file=st.session_state.get("extract__qa_file"),
+        )
         st.caption(dataset_status)
     except Exception as exc:
         st.error(f"Could not load data: {exc}")
@@ -123,7 +128,6 @@ def _load_qa_dataset_personas(
         st.info("This dataset is persona-only for now. Use Chat to browse personas.")
         return None
 
-    personas = list(dataset)
     if not personas:
         st.warning("No personas found in the selected dataset.")
         st.info(

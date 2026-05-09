@@ -1,3 +1,5 @@
+import html
+
 import streamlit as st
 import torch
 
@@ -103,7 +105,10 @@ def _render_token_picker(trace: ConversationTrace, context_key: str) -> int:
     parts: list[str] = []
     for i in range(start, end):
         token_repr = trace.tokens[i].encode("unicode_escape").decode("ascii") or "·"
-        parts.append(f"**[{token_repr}]**" if i == selected else token_repr)
+        token_repr = html.escape(token_repr)
+        parts.append(
+            f"<strong>[{token_repr}]</strong>" if i == selected else token_repr
+        )
     st.markdown(
         f"<div style='font-family:ui-monospace,monospace;font-size:0.85em;"
         f"line-height:1.6;background:rgba(127,127,127,0.08);padding:6px 10px;"

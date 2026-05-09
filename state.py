@@ -17,7 +17,6 @@ class ChatState(TypedDict):
     messages: list[ChatMessage]
     persona_id: str | None
     prompt_mode: str
-    past_key_values: object | None
 
 
 def chat_session_key(model_name: str, dataset_source: str) -> str:
@@ -31,7 +30,6 @@ def default_chat_state() -> ChatState:
         "messages": [],
         "persona_id": None,
         "prompt_mode": "templated",
-        "past_key_values": None,
     }
 
 
@@ -44,18 +42,15 @@ def reset_chat_context_state(
     """Reset one chat context and clear any related widget state."""
 
     state["messages"] = []
-    state["past_key_values"] = None
     state["persona_id"] = persona_id
     state["prompt_mode"] = prompt_mode
     for key in ui_keys:
         st.session_state.pop(key, None)
 
 
-def get_chat_state(model_name: str, remote: bool, dataset_source: str) -> ChatState:
+def get_chat_state(model_name: str, _remote: bool, dataset_source: str) -> ChatState:
     """Return the mutable chat state for the active context."""
 
     key = chat_session_key(model_name, dataset_source)
     state = st.session_state.setdefault(key, default_chat_state())
-    if remote and state.get("past_key_values") is not None:
-        state["past_key_values"] = None
     return state

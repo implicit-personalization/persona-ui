@@ -105,6 +105,12 @@ def _render_compare_panel(
             prompt_key,
             prompt_mode,
             active_system_prompt,
+            on_save=lambda: reset_chat_context_state(
+                state,
+                selected_persona.id,
+                prompt_mode,
+                pending_key,
+            ),
         )
 
     return ComparePanel(
@@ -138,7 +144,6 @@ def _generate_panels(
                             panel.prompt, panel.state["messages"]
                         ),
                         remote=remote,
-                        past_key_values=panel.state["past_key_values"],
                         **generation.to_generate_kwargs(),
                     )
                 )
@@ -151,7 +156,6 @@ def _apply_panel_results(
     *,
     panels: list[ComparePanel],
     results: list[ChatReply | Exception],
-    remote: bool,
     rollback_user_on_error: bool,
 ) -> list[ChatReply | None]:
     valid_results: list[ChatReply | None] = []
@@ -165,7 +169,6 @@ def _apply_panel_results(
             continue
 
         panel.state["messages"].append({"role": "assistant", "content": result.text})
-        panel.state["past_key_values"] = result.past_key_values if not remote else None
         valid_results.append(result)
     return valid_results
 
@@ -242,7 +245,6 @@ def _render_compare_history(
         render_chat_window(
             chat_log=panel.log,
             messages=panel.state["messages"],
-            chat_state=panel.state,
             edit_key=panel.edit_key,
             pending_key=panel.pending_key,
             show_contrast=contrast_enabled,
@@ -409,7 +411,6 @@ def render_compare_mode(
         _apply_panel_results(
             panels=regen_panels,
             results=results,
-            remote=remote,
             rollback_user_on_error=False,
         )
         st.rerun()
@@ -452,7 +453,6 @@ def render_compare_mode(
     valid_results = _apply_panel_results(
         panels=panels,
         results=results,
-        remote=remote,
         rollback_user_on_error=True,
     )
     if contrast_enabled:

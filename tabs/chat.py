@@ -113,7 +113,6 @@ def _handle_single_chat_generation(
                 model=model,
                 messages=messages,
                 remote=remote,
-                past_key_values=chat_state["past_key_values"],
                 **generation.to_generate_kwargs(),
             )
         except Exception as exc:
@@ -125,7 +124,6 @@ def _handle_single_chat_generation(
             return
 
     chat_state["messages"].append({"role": "assistant", "content": reply.text})
-    chat_state["past_key_values"] = reply.past_key_values if not remote else None
     st.rerun()
 
 
@@ -218,6 +216,13 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
             prompt_key,
             prompt_mode,
             active_system_prompt,
+            on_save=lambda: reset_chat_context_state(
+                chat_state,
+                selected_persona.id,
+                prompt_mode,
+                chat_input_key,
+                pending_key,
+            ),
         )
 
     render_probe_inspector(
@@ -232,7 +237,6 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     render_chat_window(
         chat_log=chat_log,
         messages=chat_state["messages"],
-        chat_state=chat_state,
         edit_key=edit_key,
         pending_key=pending_key,
     )

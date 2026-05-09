@@ -15,7 +15,6 @@ SystemPromptMode = Literal["empty", "templated", "biography", "custom"]
 @dataclass
 class ChatReply:
     text: str
-    past_key_values: object | None
     generated_ids: torch.Tensor | None = None
 
 
@@ -171,7 +170,6 @@ def generate_chat_reply(
     model: StandardizedTransformer,
     messages: list[dict[str, str]],
     remote: bool,
-    past_key_values: object | None = None,
     max_new_tokens: int = 256,
     do_sample: bool = False,
     temperature: float = 1.0,
@@ -183,14 +181,12 @@ def generate_chat_reply(
     """Generate one assistant reply from a full chat history.
 
     The helper uses ``model.generate`` so it works with both local and NDIF-backed
-    nnsight models. The full conversation is re-rendered each turn and the cache from
-    the previous turn is reused when available.
+    nnsight models. The full conversation is re-rendered each turn.
 
     Args:
         model: Loaded standardized nnterp model.
         messages: Full chat history, including any system prompt as the first message.
         remote: Whether to execute the generation on NDIF.
-        past_key_values: Cache returned by the previous generation step.
         max_new_tokens: Maximum number of assistant tokens to generate.
         do_sample: Whether to sample from the model distribution.
         temperature: Sampling temperature, used only when sampling is enabled.
@@ -200,7 +196,7 @@ def generate_chat_reply(
         seed: Optional local RNG seed for sampled generation.
 
     Returns:
-        ChatReply with generated text and the updated cache.
+        ChatReply with generated text and token ids.
     """
 
     tokenizer = model.tokenizer
@@ -220,9 +216,6 @@ def generate_chat_reply(
         generation_kwargs["top_k"] = top_k
     if repetition_penalty != 1.0:
         generation_kwargs["repetition_penalty"] = repetition_penalty
-    if past_key_values is not None and not remote:
-        generation_kwargs["past_key_values"] = past_key_values
-
     # `remote` is captured by nnsight's RemoteableMixin.trace() and is NOT
     # forwarded to the underlying model's generate
     with _seeded_rng(seed if do_sample and not remote else None):
@@ -240,8 +233,5 @@ def generate_chat_reply(
     text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
     return ChatReply(
         text=text,
-        past_key_values=(
-            getattr(generated, "past_key_values", None) if not remote else None
-        ),
         generated_ids=generated_ids.detach().cpu(),
     )

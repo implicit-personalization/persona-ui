@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -74,7 +75,6 @@ def _open_edit_dialog(
     *,
     msg_index: int,
     messages: list[dict[str, str]],
-    chat_state: dict[str, object],
     pending_key: str,
 ) -> None:
     message = messages[msg_index]
@@ -102,7 +102,6 @@ def _open_edit_dialog(
             if role == "assistant":
                 messages[msg_index]["_needs_contrast"] = True
             del messages[msg_index + 1 :]
-            chat_state["past_key_values"] = None
             if role == "user":
                 st.session_state[pending_key] = "regenerate_after_edit"
             st.rerun()
@@ -112,7 +111,12 @@ def _open_edit_dialog(
 
 
 @st.dialog("Edit system prompt", width="large")
-def _open_system_prompt_dialog(*, prompt_key: str, current_value: str) -> None:
+def _open_system_prompt_dialog(
+    *,
+    prompt_key: str,
+    current_value: str,
+    on_save: Callable[[], None] | None = None,
+) -> None:
     new_value = st.text_area(
         "System prompt",
         value=current_value,
@@ -123,6 +127,8 @@ def _open_system_prompt_dialog(*, prompt_key: str, current_value: str) -> None:
     with save_col:
         if st.button("Save", type="primary", use_container_width=True):
             st.session_state[prompt_key] = new_value
+            if on_save is not None:
+                on_save()
             st.rerun()
     with cancel_col:
         if st.button("Cancel", use_container_width=True):
@@ -329,7 +335,6 @@ def render_chat_window(
     *,
     chat_log: Any,
     messages: list[dict[str, str]],
-    chat_state: dict[str, object],
     edit_key: str,
     pending_key: str,
     show_contrast: bool = False,
@@ -354,7 +359,6 @@ def render_chat_window(
                     _open_edit_dialog(
                         msg_index=i,
                         messages=messages,
-                        chat_state=chat_state,
                         pending_key=pending_key,
                     )
 
@@ -372,6 +376,8 @@ def render_system_prompt(
     prompt_key: str,
     prompt_mode: str,
     active_system_prompt: str | None,
+    *,
+    on_save: Callable[[], None] | None = None,
 ) -> str | None:
     if prompt_key not in st.session_state:
         st.session_state[prompt_key] = active_system_prompt or ""
@@ -381,7 +387,11 @@ def render_system_prompt(
         if prompt_mode != "empty" and st.button(
             "Edit", icon=":material/edit:", key=f"{prompt_key}_edit"
         ):
-            _open_system_prompt_dialog(prompt_key=prompt_key, current_value=current)
+            _open_system_prompt_dialog(
+                prompt_key=prompt_key,
+                current_value=current,
+                on_save=on_save,
+            )
     return st.session_state.get(prompt_key) or None
 
 

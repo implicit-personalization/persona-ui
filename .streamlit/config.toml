@@ -1,0 +1,9 @@
+# Catppuccin Mocha theme. Switch base to "light" and swap the four colors
+# below to the Latte equivalents (see utils/theme.py) for the light flavor.
+[theme]
+base = "dark"
+primaryColor = "#89b4fa"          # Mocha blue
+backgroundColor = "#1e1e2e"       # base
+secondaryBackgroundColor = "#313244"  # surface0
+textColor = "#cdd6f4"             # text
+font = "sans serif"
