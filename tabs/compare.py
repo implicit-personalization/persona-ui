@@ -147,7 +147,9 @@ def _load_persona_options(
         ),
         assistant_ids[0] if assistant_ids else None,
     )
-    regular_ids = [persona_id for persona_id in persona_ids if persona_id not in assistant_ids]
+    regular_ids = [
+        persona_id for persona_id in persona_ids if persona_id not in assistant_ids
+    ]
     if not regular_ids and assistant_id is None:
         st.info("No personas found for this model and variant.")
         return None
@@ -173,7 +175,9 @@ def _seed_persona_memory(
             options.assistant_id in legacy_ids,
         )
 
-    default_count = len(options.regular_ids) if default_all else min(1, len(options.regular_ids))
+    default_count = (
+        len(options.regular_ids) if default_all else min(1, len(options.regular_ids))
+    )
     remembered_count = int(st.session_state.get(remembered_count_key, default_count))
     persona_count = min(max(remembered_count, 0), len(options.regular_ids))
     include_assistant = bool(
@@ -285,7 +289,9 @@ def _select_artifact_personas(
         return []
 
     regular_label = f"{persona_count} persona{'s' if persona_count != 1 else ''}"
-    assistant_label = " plus Assistant" if include_assistant and options.assistant_id else ""
+    assistant_label = (
+        " plus Assistant" if include_assistant and options.assistant_id else ""
+    )
     st.caption(f"Using {regular_label}{assistant_label}.")
     return persona_ids
 
@@ -308,7 +314,7 @@ def _render_mask_strategy_select(scope: str) -> MaskStrategy:
     return render_mask_strategy_select(
         key=widget_key("load", "mask_strategy", scope),
         last_key=_LAST_MASK_STRATEGY_KEY,
-        help="Which extracted activation set to load.",
+        help_text="Which extracted activation set to load.",
     )
 
 

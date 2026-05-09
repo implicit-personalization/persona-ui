@@ -1,6 +1,7 @@
 import html
 from dataclasses import dataclass
 
+from catppuccin import PALETTE
 import streamlit as st
 from persona_data.prompts import format_prompt
 from persona_data.synth_persona import BASELINE_PERSONA_ID, PersonaData, QAPair
@@ -12,8 +13,8 @@ from persona_vectors.extraction import (
 )
 from persona_vectors.preview import TokenSegment, preview_token_segments
 
-from utils.datasets import load_dataset, load_persona_list
 from utils.controls import render_mask_strategy_select
+from utils.datasets import load_dataset, load_persona_list
 from utils.helpers import (
     NDIF_STATUS_ICONS,
     persona_label,
@@ -164,29 +165,42 @@ def _render_persona_select(
     return selected_personas
 
 
-_TOKEN_LEGEND = (
-    '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.8em;margin-bottom:8px">'
-    '<span style="background:#86efac;color:black;padding:1px 6px;border-radius:3px">masked</span>'
-    '<span style="color:#fde047;padding:1px 6px">question</span>'
-    '<span style="color:#22d3ee;padding:1px 6px">response</span>'
-    '<span style="color:#d946ef;font-weight:bold;padding:1px 6px">special</span>'
-    '<span style="color:#9ca3af;padding:1px 6px">template</span>'
-    "</div>"
-)
-
 _MAX_PREVIEW_SAMPLES = 3
 
 
+def _preview_palette():
+    flavor = PALETTE.latte if st.get_option("theme.base") == "light" else PALETTE.mocha
+    return flavor.colors
+
+
+def _render_token_legend_html() -> str:
+    c = _preview_palette()
+    return (
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.8em;margin-bottom:8px">'
+        f'<span style="background:{c.green.hex};color:{c.base.hex};'
+        'padding:1px 6px;border-radius:3px">masked</span>'
+        f'<span style="color:{c.yellow.hex};padding:1px 6px">question</span>'
+        f'<span style="color:{c.sky.hex};padding:1px 6px">response</span>'
+        f'<span style="color:{c.mauve.hex};font-weight:bold;padding:1px 6px">special</span>'
+        f'<span style="color:{c.subtext1.hex};padding:1px 6px">template</span>'
+        "</div>"
+    )
+
+
 def _token_style(segment: TokenSegment) -> str:
+    c = _preview_palette()
     style = {
-        "response": "color:#22d3ee",
-        "question": "color:#fde047",
-    }.get(segment.role, "color:#9ca3af")
+        "response": f"color:{c.sky.hex}",
+        "question": f"color:{c.yellow.hex}",
+    }.get(segment.role, f"color:{c.subtext1.hex}")
 
     if segment.is_special:
-        style = "color:#d946ef;font-weight:bold"
+        style = f"color:{c.mauve.hex};font-weight:bold"
     if segment.is_masked:
-        style = f"{style};background:#86efac;border-radius:2px;padding:0 1px"
+        style = (
+            f"{style};background:{c.green.hex};color:{c.base.hex};"
+            "border-radius:2px;padding:0 1px"
+        )
     return style
 
 
@@ -215,7 +229,7 @@ def _render_mask_strategy_select(
     return render_mask_strategy_select(
         key=_extract_widget_key(model_name, remote, dataset_source, "mask_strategy"),
         last_key=_LAST_MASK_STRATEGY_KEY,
-        help="Which tokens contribute to the averaged hidden state.",
+        help_text="Which tokens contribute to the averaged hidden state.",
     )
 
 
@@ -290,7 +304,7 @@ def _render_token_preview(
 ) -> None:
     with st.spinner("Loading tokenizer..."):
         model = cached_model(model_name=model_name)
-    st.markdown(_TOKEN_LEGEND, unsafe_allow_html=True)
+    st.markdown(_render_token_legend_html(), unsafe_allow_html=True)
     for persona, qa_pairs, variant in run_plan:
         system_prompt = format_prompt(persona, variant)  # type: ignore[arg-type]
         prepared = prepare_inputs_for_strategy(

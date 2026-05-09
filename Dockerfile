@@ -13,6 +13,7 @@ RUN uv sync --frozen --no-dev
 
 COPY app.py ./
 COPY state.py ./
+COPY .streamlit/ ./.streamlit/
 COPY tabs/ ./tabs/
 COPY utils/ ./utils/
 
