@@ -434,6 +434,7 @@ def _render_layered_figure_analysis(
     button_label: str,
     title_fn: Callable[[str], str],
     include_pair_trajectories: bool = False,
+    n_components: int = 2,
 ) -> None:
     """Render a single-variant layered analysis: select → button → figure(s).
 
@@ -452,11 +453,12 @@ def _render_layered_figure_analysis(
         store.model_name,
         mask_strategy.value,
         figure_kind,
+        str(n_components),
         variant,
         "persona_vector",
         persona_key,
     )
-    filename = scope
+    filename = scope if n_components == 2 else f"{scope}_3d"
 
     if st.button(button_label, type="primary"):
         try:
@@ -466,11 +468,15 @@ def _render_layered_figure_analysis(
                 mask_strategy=mask_strategy,
                 persona_ids=persona_ids,
             )
+            build_kwargs = {}
+            if figure_kind in {"umap", "pca"}:
+                build_kwargs["n_components"] = n_components
             main_fig = build_layered_figure(
                 samples,
                 figure_kind,
                 layers=selected_layers,
                 title=title_fn(variant),
+                **build_kwargs,
             )
             if figure_kind in {"umap", "pca"}:
                 main_fig.update_layout(height=700)
@@ -577,13 +583,23 @@ def render_compare_tab(model_name: str) -> None:
         )
         return
 
+    dimension_choice = st.segmented_control(
+        "Projection dimensions",
+        options=["2D", "3D"],
+        default="2D",
+        key=widget_key("load", "projection_dims", analysis_mode),
+        label_visibility="collapsed",
+    )
+    n_components = 3 if dimension_choice == "3D" else 2
+    dim_suffix = "" if n_components == 2 else " (3D)"
     _render_layered_figure_analysis(
         store,
         mask_strategy,
-        scope=analysis_mode.lower(),
+        scope=f"{analysis_mode.lower()}{'_3d' if n_components == 3 else ''}",
         figure_kind=analysis_mode.lower(),
-        button_label=f"Generate {analysis_mode} projection",
+        button_label=f"Generate {analysis_mode}{dim_suffix} projection",
         title_fn=lambda v: (
-            f"{analysis_mode} - {prompt_variant_label(v)} - persona vectors"
+            f"{analysis_mode}{dim_suffix} - {prompt_variant_label(v)} - persona vectors"
         ),
+        n_components=n_components,
     )

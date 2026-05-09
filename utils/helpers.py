@@ -27,8 +27,8 @@ ANALYSIS_MODES = ["Cosine similarity", "Similarity matrix", "PCA", "UMAP"]
 ANALYSIS_HELP_TEXT = {
     "Cosine similarity": "Compare layer-wise alignment between variants.",
     "Similarity matrix": "Compare centered pairwise similarity between persona vectors by layer, with pair trajectories across layers.",
-    "PCA": "Project per-persona vectors into a 2D global view.",
-    "UMAP": "Project per-persona vectors into a 2D local-neighborhood view.",
+    "PCA": "Project per-persona vectors into a 2D or 3D global view.",
+    "UMAP": "Project per-persona vectors into a 2D or 3D local-neighborhood view.",
 }
 
 NDIF_STATUS_ICONS = {
