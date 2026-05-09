@@ -1,13 +1,13 @@
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import combinations
+from pathlib import Path
 
 import streamlit as st
 from persona_data.environment import get_artifacts_dir
+from persona_data.synth_persona import BASELINE_PERSONA_ID
 from persona_vectors.analysis import load_persona_vectors, load_variant_vectors
-from persona_vectors.artifacts import ActivationStore, HFActivationStore
-from persona_vectors.artifacts import list_layers as list_local_layers
+from persona_vectors.artifacts import HFActivationStore
 from persona_vectors.extraction import MaskStrategy
 from persona_vectors.plots import (
     build_layered_figure,
@@ -16,48 +16,37 @@ from persona_vectors.plots import (
     save_plot_html,
 )
 
+from utils.compare_sources import (
+    DEFAULT_COMPARE_MODEL,
+    DEFAULT_HUB_REPO,
+    SOURCE_HUB,
+    SOURCE_LOCAL,
+    SOURCES,
+    Store,
+    activation_store_cached,
+    available_variants,
+    hub_layers_cached,
+    hub_models_by_mask_strategy,
+    list_layers_cached,
+    local_model_matches,
+    local_model_options_cached,
+    persona_names_cached,
+    personas_cached,
+    store_cache_parts,
+    store_id,
+)
+from utils.controls import render_mask_strategy_select
 from utils.helpers import (
     ANALYSIS_HELP_TEXT,
     ANALYSIS_MODES,
-    persona_display_label,
     prompt_variant_label,
     slugify,
     widget_key,
 )
 
-Store = ActivationStore | HFActivationStore
-
-DEFAULT_HUB_REPO = os.environ.get(
-    "PERSONA_VECTORS_HUB_REPO",
-    "implicit-personalization/synth-persona-vectors",
-)
-SOURCE_HUB = "Hugging Face Hub"
-SOURCE_LOCAL = "Local activations"
-SOURCES = (SOURCE_HUB, SOURCE_LOCAL)
-
 
 def _filename(*parts: str) -> str:
     return "__".join(slugify(part) for part in parts if part)
-
-
-_list_layers_cached = st.cache_data(show_spinner=False)(list_local_layers)
-
-
-@st.cache_data(show_spinner=False)
-def _hub_layers_cached(
-    repo_id: str,
-    model_name: str,
-    mask_strategy_value: str,
-    variant: str,
-    persona_id: str,
-) -> list[int]:
-    store = HFActivationStore(
-        repo_id,
-        model_name,
-        mask_strategy=MaskStrategy(mask_strategy_value),
-    )
-    sample = store.load(variant, persona_id)
-    return list(range(int(sample.shape[0])))
 
 
 # Keep compare-tab selection state separate so projection defaults do not
@@ -66,6 +55,15 @@ _LAST_COSINE_PERSONAS_KEY = "compare:last_personas:cosine"
 _LAST_PROJECTION_PERSONAS_KEY = "compare:last_personas:projection"
 _LAST_MASK_STRATEGY_KEY = "compare:last_mask_strategy"
 _LAST_SOURCE_KEY = "compare:last_source"
+
+
+def _is_assistant_persona(persona_id: str, persona_name: str | None = None) -> bool:
+    persona_id_normalized = persona_id.strip().lower()
+    persona_name_normalized = (persona_name or "").strip().lower()
+    return (
+        persona_id_normalized in {"assistant", BASELINE_PERSONA_ID.lower()}
+        or persona_name_normalized == "assistant"
+    )
 
 
 @dataclass(frozen=True)
@@ -77,11 +75,10 @@ class CosineSelection:
     persona_key: str
 
 
-def _store_id(store: Store) -> str:
-    """Stable identifier for cache/widget keys that distinguishes Hub vs local."""
-    if isinstance(store, HFActivationStore):
-        return f"hub:{store.repo_id}"
-    return f"local:{store.root_dir}"
+@dataclass(frozen=True)
+class PersonaOptions:
+    regular_ids: list[str]
+    assistant_id: str | None
 
 
 def _layers_for_variant(
@@ -93,20 +90,145 @@ def _layers_for_variant(
     if isinstance(store, HFActivationStore):
         if not persona_ids:
             return []
-        return _hub_layers_cached(
+        return hub_layers_cached(
             store.repo_id,
             store.model_name,
             mask_strategy.value,
             variant,
             persona_ids[0],
         )
-    return _list_layers_cached(
+    return list_layers_cached(
         str(store.root_dir),
         store.model_name,
         [variant],
         persona_ids,
         mask_strategy=mask_strategy,
     )
+
+
+def _load_persona_options(
+    store: Store,
+    variants: list[str],
+    mask_strategy: MaskStrategy,
+    *,
+    empty_message: str,
+) -> PersonaOptions | None:
+    source, location, model_name = store_cache_parts(store)
+    variant_key = tuple(variants)
+    persona_ids = personas_cached(
+        source,
+        location,
+        model_name,
+        mask_strategy.value,
+        variant_key,
+    )
+    if not persona_ids:
+        st.info(empty_message)
+        return None
+
+    persona_names = persona_names_cached(
+        source,
+        location,
+        model_name,
+        mask_strategy.value,
+        variant_key,
+        tuple(persona_ids),
+    )
+    assistant_ids = [
+        persona_id
+        for persona_id in persona_ids
+        if _is_assistant_persona(persona_id, persona_names.get(persona_id))
+    ]
+    assistant_id = next(
+        (
+            persona_id
+            for persona_id in assistant_ids
+            if persona_id == BASELINE_PERSONA_ID
+        ),
+        assistant_ids[0] if assistant_ids else None,
+    )
+    regular_ids = [persona_id for persona_id in persona_ids if persona_id not in assistant_ids]
+    if not regular_ids and assistant_id is None:
+        st.info("No personas found for this model and variant.")
+        return None
+    return PersonaOptions(regular_ids=regular_ids, assistant_id=assistant_id)
+
+
+def _seed_persona_memory(
+    remember_key: str,
+    options: PersonaOptions,
+    *,
+    default_all: bool,
+) -> tuple[int, bool]:
+    remembered_count_key = f"{remember_key}:count"
+    remembered_assistant_key = f"{remember_key}:include_assistant"
+    legacy_ids = st.session_state.get(remember_key, [])
+    if isinstance(legacy_ids, list) and legacy_ids:
+        st.session_state.setdefault(
+            remembered_count_key,
+            sum(persona_id in options.regular_ids for persona_id in legacy_ids),
+        )
+        st.session_state.setdefault(
+            remembered_assistant_key,
+            options.assistant_id in legacy_ids,
+        )
+
+    default_count = len(options.regular_ids) if default_all else min(1, len(options.regular_ids))
+    remembered_count = int(st.session_state.get(remembered_count_key, default_count))
+    persona_count = min(max(remembered_count, 0), len(options.regular_ids))
+    include_assistant = bool(
+        st.session_state.get(remembered_assistant_key, options.assistant_id is not None)
+    )
+    return persona_count, include_assistant
+
+
+def _render_persona_count_controls(
+    store: Store,
+    variants: list[str],
+    mask_strategy: MaskStrategy,
+    widget_scope: str,
+    options: PersonaOptions,
+    *,
+    default_count: int,
+    include_assistant_default: bool,
+) -> tuple[int, bool]:
+    count_key = widget_key(
+        "load",
+        "persona_count",
+        widget_scope,
+        store.model_name,
+        mask_strategy.value,
+        *variants,
+    )
+    assistant_key = widget_key(
+        "load",
+        "include_assistant",
+        widget_scope,
+        store.model_name,
+        mask_strategy.value,
+        *variants,
+    )
+
+    if options.regular_ids:
+        persona_count = st.slider(
+            "Personas",
+            min_value=0 if options.assistant_id is not None else 1,
+            max_value=len(options.regular_ids),
+            value=default_count,
+            key=count_key,
+            help="Use the first N available non-assistant personas.",
+        )
+    else:
+        persona_count = 0
+        st.caption("No non-assistant personas are available for this selection.")
+    include_assistant = False
+    if options.assistant_id is not None:
+        include_assistant = st.checkbox(
+            "Include Assistant persona",
+            value=include_assistant_default,
+            key=assistant_key,
+        )
+    return persona_count, include_assistant
 
 
 def _select_artifact_personas(
@@ -117,51 +239,55 @@ def _select_artifact_personas(
     widget_scope: str,
     remember_key: str,
     default_all: bool = False,
-) -> tuple[list[str], dict[str, str]]:
-    persona_options = store.list_personas(variants)
-    persona_names = store.persona_names(persona_options, variants=variants)
-    if not persona_options:
-        if len(variants) > 1:
-            st.info(
-                "No personas have vectors for all selected variants. "
-                "Pick a single variant or change the source."
-            )
-        else:
-            st.info("No personas found for this model and variant.")
-        return [], persona_names
+) -> list[str]:
+    empty_message = (
+        "No personas have vectors for all selected variants. "
+        "Pick a single variant or change the source."
+        if len(variants) > 1
+        else "No personas found for this model and variant."
+    )
+    options = _load_persona_options(
+        store,
+        variants,
+        mask_strategy,
+        empty_message=empty_message,
+    )
+    if options is None:
+        return []
 
-    last_personas: list[str] = st.session_state.get(remember_key, [])
-    default_personas = [p for p in last_personas if p in persona_options]
-    if not default_personas:
-        default_personas = persona_options if default_all else persona_options[:1]
-
-    persona_key = widget_key(
-        "load",
-        "personas",
+    default_count, include_assistant_default = _seed_persona_memory(
+        remember_key,
+        options,
+        default_all=default_all,
+    )
+    persona_count, include_assistant = _render_persona_count_controls(
+        store,
+        variants,
+        mask_strategy,
         widget_scope,
-        store.model_name,
-        mask_strategy.value,
-        *variants,
+        options,
+        default_count=default_count,
+        include_assistant_default=include_assistant_default,
     )
 
-    def _remember_personas() -> None:
-        st.session_state[remember_key] = [
-            persona_id
-            for persona_id in st.session_state.get(persona_key, [])
-            if persona_id in persona_options
-        ]
+    persona_ids = options.regular_ids[:persona_count]
+    if include_assistant and options.assistant_id is not None:
+        persona_ids.append(options.assistant_id)
 
-    persona_ids = st.multiselect(
-        "Personas",
-        options=persona_options,
-        default=default_personas,
-        format_func=lambda persona_id: persona_display_label(
-            persona_id, persona_names.get(persona_id)
-        ),
-        key=persona_key,
-        on_change=_remember_personas,
-    )
-    return persona_ids, persona_names
+    remembered_count_key = f"{remember_key}:count"
+    remembered_assistant_key = f"{remember_key}:include_assistant"
+    st.session_state[remembered_count_key] = persona_count
+    st.session_state[remembered_assistant_key] = include_assistant
+    st.session_state[remember_key] = persona_ids
+
+    if not persona_ids:
+        st.info("Select at least one persona or include the Assistant persona.")
+        return []
+
+    regular_label = f"{persona_count} persona{'s' if persona_count != 1 else ''}"
+    assistant_label = " plus Assistant" if include_assistant and options.assistant_id else ""
+    st.caption(f"Using {regular_label}{assistant_label}.")
+    return persona_ids
 
 
 def _render_save_buttons(
@@ -179,35 +305,18 @@ def _render_save_buttons(
 
 
 def _render_mask_strategy_select(scope: str) -> MaskStrategy:
-    last_strategy = st.session_state.get(
-        _LAST_MASK_STRATEGY_KEY,
-        MaskStrategy.ANSWER_MEAN.value,
-    )
-    strategies = list(MaskStrategy)
-    selected = st.selectbox(
-        "Mask strategy",
-        options=strategies,
-        index=next(
-            (
-                idx
-                for idx, strategy in enumerate(strategies)
-                if strategy.value == last_strategy
-            ),
-            0,
-        ),
-        format_func=lambda strategy: strategy.value.replace("_", " ").title(),
+    return render_mask_strategy_select(
         key=widget_key("load", "mask_strategy", scope),
+        last_key=_LAST_MASK_STRATEGY_KEY,
         help="Which extracted activation set to load.",
     )
-    st.session_state[_LAST_MASK_STRATEGY_KEY] = selected.value
-    return selected
 
 
 def _render_cosine_selection(
     store: Store,
     mask_strategy: MaskStrategy,
 ) -> CosineSelection | None:
-    variants = store.available_variants()
+    variants = available_variants(store, mask_strategy)
     if len(variants) < 2:
         st.info("Need at least two variants with saved vectors for cosine comparison.")
         return None
@@ -220,7 +329,7 @@ def _render_cosine_selection(
                 options=variants,
                 index=0,
                 format_func=prompt_variant_label,
-                key=widget_key("load", "variant_a", _store_id(store)),
+                key=widget_key("load", "variant_a", store_id(store)),
             )
         with col2:
             variant_b = st.selectbox(
@@ -228,18 +337,18 @@ def _render_cosine_selection(
                 options=variants,
                 index=min(1, len(variants) - 1),
                 format_func=prompt_variant_label,
-                key=widget_key("load", "variant_b", _store_id(store)),
+                key=widget_key("load", "variant_b", store_id(store)),
             )
 
         if variant_a == variant_b:
             st.warning("Choose two different variants to compare.")
             return None
 
-        persona_ids, _ = _select_artifact_personas(
+        persona_ids = _select_artifact_personas(
             store,
             [variant_a, variant_b],
             mask_strategy,
-            widget_scope=f"cosine:{_store_id(store)}",
+            widget_scope=f"cosine:{store_id(store)}",
             remember_key=_LAST_COSINE_PERSONAS_KEY,
         )
     if not persona_ids:
@@ -334,7 +443,7 @@ def _render_cosine_similarity(
     cosine_fig_key = widget_key(
         "load",
         "cosine_fig_state",
-        _store_id(store),
+        store_id(store),
         store.model_name,
         mask_strategy.value,
         selection.variant_a,
@@ -363,7 +472,7 @@ def _render_cosine_similarity(
         key=widget_key(
             "load",
             "compare_vectors",
-            _store_id(store),
+            store_id(store),
             store.model_name,
             mask_strategy.value,
             selection.variant_a,
@@ -398,7 +507,7 @@ def _select_single_variant_samples(
     mask_strategy: MaskStrategy,
     scope: str,
 ) -> tuple[str, list[str], str, list[int]] | None:
-    variants = store.available_variants()
+    variants = available_variants(store, mask_strategy)
     if not variants:
         st.info("No variants with saved vectors for this model.")
         return None
@@ -407,13 +516,13 @@ def _select_single_variant_samples(
         options=variants,
         index=variants.index("biography") if "biography" in variants else 0,
         format_func=prompt_variant_label,
-        key=widget_key("load", "variant", scope, _store_id(store)),
+        key=widget_key("load", "variant", scope, store_id(store)),
     )
-    persona_ids, _ = _select_artifact_personas(
+    persona_ids = _select_artifact_personas(
         store,
         [variant],
         mask_strategy,
-        widget_scope=f"{scope}:{_store_id(store)}",
+        widget_scope=f"{scope}:{store_id(store)}",
         remember_key=_LAST_PROJECTION_PERSONAS_KEY,
         default_all=True,
     )
@@ -426,26 +535,8 @@ def _select_single_variant_samples(
         st.info("No shared layers are available for the selected personas.")
         return None
 
-    selected_layers = st.multiselect(
-        "Layers",
-        options=layer_options,
-        default=layer_options,
-        key=widget_key(
-            "load",
-            "layers",
-            scope,
-            _store_id(store),
-            store.model_name,
-            mask_strategy.value,
-            variant,
-            persona_key,
-        ),
-    )
-    if not selected_layers:
-        st.info("Select at least one layer.")
-        return None
-
-    return variant, persona_ids, persona_key, selected_layers
+    st.caption(f"Using all {len(layer_options)} available layer(s).")
+    return variant, persona_ids, persona_key, layer_options
 
 
 def _render_layered_figure_analysis(
@@ -472,7 +563,7 @@ def _render_layered_figure_analysis(
     fig_key = widget_key(
         "load",
         f"{scope}_fig_state",
-        _store_id(store),
+        store_id(store),
         store.model_name,
         mask_strategy.value,
         figure_kind,
@@ -481,7 +572,7 @@ def _render_layered_figure_analysis(
         "persona_vector",
         persona_key,
     )
-    filename = scope if n_components == 2 else f"{scope}_3d"
+    filename = scope
 
     if st.button(button_label, type="primary"):
         try:
@@ -549,7 +640,105 @@ def _render_source_select() -> str:
     return source
 
 
-def _build_store(source: str, model_name: str, mask_strategy: MaskStrategy) -> Store:
+def _render_hub_model_select(
+    repo_id: str,
+    mask_strategy: MaskStrategy,
+) -> str:
+    fallback_model = st.session_state.get(
+        "compare:hub_model_fallback",
+        DEFAULT_COMPARE_MODEL,
+    )
+    try:
+        models_by_strategy = hub_models_by_mask_strategy(repo_id)
+    except Exception as exc:
+        st.warning(f"Could not load Hub configs for `{repo_id}`: {exc}")
+        return st.text_input(
+            "Hub model",
+            value=fallback_model,
+            key="compare:hub_model_fallback",
+            help="Compare-only model id to use if Hub config discovery is unavailable.",
+        )
+
+    model_options = models_by_strategy.get(mask_strategy, [])
+    if not model_options:
+        st.warning(
+            f"No Hub vector configs found for `{mask_strategy.value}` in `{repo_id}`."
+        )
+        return st.text_input(
+            "Hub model",
+            value=fallback_model,
+            key="compare:hub_model_fallback",
+            help="Compare-only model id to use for this Hub repo.",
+        )
+
+    previous_model = st.session_state.get(
+        widget_key("load", "hub_model", repo_id, mask_strategy.value),
+        fallback_model,
+    )
+    default_model = (
+        previous_model if previous_model in model_options else model_options[0]
+    )
+
+    return st.selectbox(
+        "Hub model",
+        options=model_options,
+        index=model_options.index(default_model),
+        key=widget_key("load", "hub_model", repo_id, mask_strategy.value),
+        help="Models with vectors in the selected Hub repo and mask strategy.",
+    )
+
+
+def _render_local_model_select(
+    artifacts_root: str,
+    mask_strategy: MaskStrategy,
+) -> str:
+    fallback_model = st.session_state.get("compare:local_model", DEFAULT_COMPARE_MODEL)
+    model_options = local_model_options_cached(artifacts_root, mask_strategy.value)
+    if not model_options:
+        return st.text_input(
+            "Local model",
+            value=fallback_model,
+            key="compare:local_model",
+            help="Compare-only local model id or path.",
+        )
+
+    custom = st.toggle(
+        "Custom local model",
+        value=False,
+        key="compare:local_model_custom_enabled",
+        help="Enter a model id/path manually instead of choosing from activation directories.",
+    )
+    if custom:
+        return st.text_input(
+            "Local model",
+            value=fallback_model,
+            key="compare:local_model",
+            help="Compare-only local model id or path.",
+        )
+
+    previous_model = st.session_state.get("compare:local_model_select", fallback_model)
+    if not any(local_model_matches(previous_model, option) for option in model_options):
+        previous_model = fallback_model
+    default_model = next(
+        (
+            option
+            for option in model_options
+            if local_model_matches(option, previous_model)
+        ),
+        model_options[0],
+    )
+    selected = st.selectbox(
+        "Local model",
+        options=model_options,
+        index=model_options.index(default_model),
+        key="compare:local_model_select",
+        help="Models discovered under the selected artifacts root.",
+    )
+    st.session_state["compare:local_model"] = selected
+    return selected
+
+
+def _build_store(source: str, mask_strategy: MaskStrategy) -> Store:
     if source == SOURCE_HUB:
         repo = st.text_input(
             "Hub repo",
@@ -557,16 +746,29 @@ def _build_store(source: str, model_name: str, mask_strategy: MaskStrategy) -> S
             key="compare:hub_repo",
             help="Hugging Face dataset published by `scripts/push_to_hf.py`.",
         )
-        return HFActivationStore(repo, model_name, mask_strategy=mask_strategy)
+        hub_model_name = _render_hub_model_select(repo, mask_strategy)
+        return activation_store_cached(
+            SOURCE_HUB,
+            repo,
+            hub_model_name,
+            mask_strategy.value,
+        )
     artifacts_root = st.text_input(
         "Artifacts root",
         value=str(get_artifacts_dir() / "activations"),
         key="compare:artifacts_root",
     )
-    return ActivationStore(model_name, artifacts_root, mask_strategy=mask_strategy)
+    artifacts_root = str(Path(artifacts_root).expanduser())
+    local_model_name = _render_local_model_select(artifacts_root, mask_strategy)
+    return activation_store_cached(
+        SOURCE_LOCAL,
+        artifacts_root,
+        local_model_name,
+        mask_strategy.value,
+    )
 
 
-def render_compare_tab(model_name: str) -> None:
+def render_compare_tab() -> None:
     """Render the compare tab."""
 
     st.title("Compare")
@@ -585,9 +787,9 @@ def render_compare_tab(model_name: str) -> None:
         analysis_mode = ANALYSIS_MODES[0]
     st.caption(ANALYSIS_HELP_TEXT[analysis_mode])
 
-    with st.expander("Source settings", expanded=False):
+    with st.expander("Source settings", expanded=True):
         mask_strategy = _render_mask_strategy_select(analysis_mode)
-        store = _build_store(source, model_name, mask_strategy)
+        store = _build_store(source, mask_strategy)
 
     if analysis_mode == "Cosine similarity":
         _render_cosine_similarity(store, mask_strategy)

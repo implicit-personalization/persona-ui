@@ -13,6 +13,7 @@ from persona_vectors.extraction import (
 from persona_vectors.preview import TokenSegment, preview_token_segments
 
 from utils.datasets import load_dataset, load_persona_list
+from utils.controls import render_mask_strategy_select
 from utils.helpers import (
     NDIF_STATUS_ICONS,
     persona_label,
@@ -211,28 +212,11 @@ def _render_mask_strategy_select(
     remote: bool,
     dataset_source: str,
 ) -> MaskStrategy:
-    last_strategy = st.session_state.get(
-        _LAST_MASK_STRATEGY_KEY,
-        MaskStrategy.ANSWER_MEAN.value,
-    )
-    strategy_options = list(MaskStrategy)
-    mask_strategy = st.selectbox(
-        "Mask strategy",
-        options=strategy_options,
-        index=next(
-            (
-                idx
-                for idx, strategy in enumerate(strategy_options)
-                if strategy.value == last_strategy
-            ),
-            0,
-        ),
-        format_func=lambda s: s.value.replace("_", " ").title(),
+    return render_mask_strategy_select(
         key=_extract_widget_key(model_name, remote, dataset_source, "mask_strategy"),
+        last_key=_LAST_MASK_STRATEGY_KEY,
         help="Which tokens contribute to the averaged hidden state.",
     )
-    st.session_state[_LAST_MASK_STRATEGY_KEY] = mask_strategy.value
-    return mask_strategy
 
 
 def _collect_runs(

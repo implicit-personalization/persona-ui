@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -14,6 +15,14 @@ _LAST_REMOTE_MODEL_KEY = "sidebar:last_remote_model"
 
 _TABS = ["Chat", "Compare", "Extract"]
 _TAB_ICONS = [":material/chat:", ":material/search:", ":material/tune:"]
+
+
+@dataclass(frozen=True)
+class SidebarState:
+    remote: bool
+    model_name: str
+    dataset_source: str
+    active_tab: str
 
 
 def _remote_model_input(remote_models: list[str]) -> str:
@@ -74,7 +83,7 @@ def _remote_model_input(remote_models: list[str]) -> str:
     return model_name
 
 
-def _sidebar_controls() -> tuple[bool, str, str, str]:
+def _sidebar_controls() -> SidebarState:
     from utils.runtime import list_remote_models
 
     with st.sidebar:
@@ -95,6 +104,19 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
             ):
                 st.session_state["sidebar__active_tab"] = tab_name
                 st.rerun()
+
+        if active_tab == "Compare":
+            model_name = st.session_state.get(_LAST_LOCAL_MODEL_KEY, DEFAULT_MODEL)
+            dataset_source = st.session_state.get(
+                "sidebar__dataset_source",
+                DATASET_SOURCES[0],
+            )
+            return SidebarState(
+                remote=False,
+                model_name=model_name,
+                dataset_source=dataset_source,
+                active_tab=active_tab,
+            )
 
         st.divider()
         st.caption("Runtime")
@@ -119,7 +141,12 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
             help="Dataset for Chat and Extract.",
         )
 
-    return remote, model_name, dataset_source, active_tab
+    return SidebarState(
+        remote=remote,
+        model_name=model_name,
+        dataset_source=dataset_source,
+        active_tab=active_tab,
+    )
 
 
 def main() -> None:
@@ -136,20 +163,20 @@ def main() -> None:
 
     torch.set_grad_enabled(False)
 
-    remote, model_name, dataset_source, active_tab = _sidebar_controls()
+    sidebar = _sidebar_controls()
 
-    if active_tab == "Extract":
+    if sidebar.active_tab == "Extract":
         from tabs.extract import render_extract_tab
 
-        render_extract_tab(remote, model_name, dataset_source)
-    elif active_tab == "Compare":
+        render_extract_tab(sidebar.remote, sidebar.model_name, sidebar.dataset_source)
+    elif sidebar.active_tab == "Compare":
         from tabs.compare import render_compare_tab
 
-        render_compare_tab(model_name)
+        render_compare_tab()
     else:
         from tabs.chat import render_chat_tab
 
-        render_chat_tab(remote, model_name, dataset_source)
+        render_chat_tab(sidebar.remote, sidebar.model_name, sidebar.dataset_source)
 
 
 if __name__ == "__main__":
