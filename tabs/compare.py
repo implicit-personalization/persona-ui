@@ -14,7 +14,6 @@ from persona_vectors.plots import (
     build_pair_similarity_figure,
     plot_layer_similarity,
     save_plot_html,
-    save_plot_png,
 )
 
 from utils.helpers import (
@@ -147,19 +146,13 @@ def _render_save_buttons(
     filenames: list[str],
     key_suffix: str,
 ) -> None:
-    """Render Save HTML / Save PNG column buttons for one or more figures."""
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Save HTML", key=widget_key("load", "save_html", key_suffix)):
+    """Render the Save HTML button for one or more figures."""
+    if st.button("Save HTML", key=widget_key("load", "save_html", key_suffix)):
+        try:
             paths = [save_plot_html(fig, fn) for fig, fn in zip(figs, filenames)]
             st.success(f"Saved {len(paths)} HTML file(s) to `artifacts/plots`.")
-    with col2:
-        if st.button("Save PNG", key=widget_key("load", "save_png", key_suffix)):
-            try:
-                paths = [save_plot_png(fig, fn) for fig, fn in zip(figs, filenames)]
-                st.success(f"Saved {len(paths)} PNG file(s) to `artifacts/plots`.")
-            except Exception as exc:
-                st.error(f"Could not save PNG: {exc}")
+        except Exception as exc:
+            st.error(f"Could not save HTML: {exc}")
 
 
 def _render_mask_strategy_select(scope: str) -> MaskStrategy:
@@ -463,15 +456,7 @@ def _render_layered_figure_analysis(
         "persona_vector",
         persona_key,
     )
-    filename = _filename(
-        "compare",
-        scope,
-        store.model_name,
-        mask_strategy.value,
-        variant,
-        "persona_vector",
-        persona_key,
-    )
+    filename = scope
 
     if st.button(button_label, type="primary"):
         try:
@@ -487,6 +472,8 @@ def _render_layered_figure_analysis(
                 layers=selected_layers,
                 title=title_fn(variant),
             )
+            if figure_kind in {"umap", "pca"}:
+                main_fig.update_layout(height=700)
             extra_fig = (
                 build_pair_similarity_figure(
                     samples,

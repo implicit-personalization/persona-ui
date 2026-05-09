@@ -1,4 +1,5 @@
 import os
+import threading
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -14,6 +15,22 @@ _LAST_REMOTE_MODEL_KEY = "sidebar:last_remote_model"
 
 _TABS = ["Chat", "Compare", "Extract"]
 _TAB_ICONS = [":material/chat:", ":material/search:", ":material/tune:"]
+
+
+def _preload_default_model() -> None:
+    """Background-warm the default local model so the first chat is instant."""
+    try:
+        import torch
+
+        torch.set_grad_enabled(False)
+        from utils.runtime import cached_model
+
+        cached_model(DEFAULT_MODEL)
+    except Exception:
+        pass
+
+
+threading.Thread(target=_preload_default_model, daemon=True).start()
 
 
 def _remote_model_input(remote_models: list[str]) -> str:
@@ -78,8 +95,7 @@ def _sidebar_controls() -> tuple[bool, str, str, str]:
     from utils.runtime import list_remote_models
 
     with st.sidebar:
-        st.markdown("# Persona UI")
-        st.caption("Chat, extract, and compare persona runs.")
+        st.markdown("## Persona UI")
 
         if "sidebar__active_tab" not in st.session_state:
             st.session_state["sidebar__active_tab"] = "Chat"

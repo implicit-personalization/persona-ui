@@ -46,6 +46,28 @@ def _uploaded_file_to_temp_path(uploaded_file: Any, stem: str) -> Path:
     return temp_path
 
 
+def load_persona_list(
+    dataset_source: str,
+    personas_file: Any = None,
+    qa_file: Any = None,
+) -> tuple[list, str]:
+    """Like ``load_dataset`` but returns ``(personas_list, status)``.
+
+    The list is memoized on the cached dataset instance so repeated reruns
+    don't pay for re-iteration.
+    """
+
+    dataset, status = load_dataset(dataset_source, personas_file, qa_file)
+    cached = getattr(dataset, "_persona_list_cache", None)
+    if cached is None:
+        cached = list(dataset)
+        try:
+            dataset._persona_list_cache = cached
+        except (AttributeError, TypeError):
+            pass
+    return cached, status
+
+
 def load_dataset(
     dataset_source: str,
     personas_file: Any = None,

@@ -21,6 +21,21 @@ GENERATION_DEFAULTS = {
     "repetition_penalty": 1.0,
 }
 
+_LAST_GEN_PREFIX = "chat:last_gen:"
+
+
+def _persisted_key(context_key: str, name: str, default) -> str:
+    """Per-context widget key, seeded from the last cross-context value."""
+    last_key = f"{_LAST_GEN_PREFIX}{name}"
+    key = widget_key(context_key, name)
+    if key not in st.session_state:
+        st.session_state[key] = st.session_state.get(last_key, default)
+    return key
+
+
+def _remember(name: str, value) -> None:
+    st.session_state[f"{_LAST_GEN_PREFIX}{name}"] = value
+
 
 @dataclass(frozen=True)
 class GenerationConfig:
@@ -119,6 +134,8 @@ def render_advanced_settings(
     remote: bool,
     *,
     last_compare_mode_key: str,
+    last_probe_enabled_key: str = "",
+    last_token_contrast_key: str = "",
 ) -> tuple[GenerationConfig, ChatTools]:
     """Render the Advanced expander: tool toggles + generation settings."""
     with st.expander("Advanced", expanded=False):
@@ -130,12 +147,23 @@ def render_advanced_settings(
                 last_compare_mode_key, False
             )
 
+        probe_key = widget_key(context_key, "probe_enabled")
+        if probe_key not in st.session_state:
+            st.session_state[probe_key] = st.session_state.get(
+                last_probe_enabled_key, False
+            )
+
+        token_contrast_key = widget_key(context_key, "token_contrast")
+        if token_contrast_key not in st.session_state:
+            st.session_state[token_contrast_key] = st.session_state.get(
+                last_token_contrast_key, False
+            )
+
         tools_col1, tools_col2, tools_col3 = st.columns(3)
         with tools_col1:
             probe_enabled = st.toggle(
                 "Probe tools",
-                value=False,
-                key=widget_key(context_key, "probe_enabled"),
+                key=probe_key,
                 help="Trace chat activations and run compatible `.pt` probes on tapped tokens.",
             )
         with tools_col2:
@@ -147,8 +175,7 @@ def render_advanced_settings(
         with tools_col3:
             token_contrast = st.toggle(
                 "Token contrast",
-                value=False,
-                key=widget_key(context_key, "token_contrast"),
+                key=token_contrast_key,
                 disabled=not compare_mode,
                 help=(
                     "Color each generated token by how characteristic it is of each persona. "
@@ -158,95 +185,122 @@ def render_advanced_settings(
                 ),
             )
         st.session_state[last_compare_mode_key] = compare_mode
+        if last_probe_enabled_key:
+            st.session_state[last_probe_enabled_key] = probe_enabled
+        if last_token_contrast_key:
+            st.session_state[last_token_contrast_key] = token_contrast
 
         st.divider()
         st.caption("Generation")
+        generation = _render_generation_fragment(context_key, remote)
 
-        config_col1, config_col2 = st.columns([2, 1])
-        with config_col1:
-            max_new_tokens = st.slider(
-                "Max new tokens",
-                min_value=16,
-                max_value=512,
-                value=GENERATION_DEFAULTS["max_new_tokens"],
-                step=16,
-                key=widget_key(context_key, "max_new_tokens"),
-            )
-        with config_col2:
-            repetition_penalty = st.slider(
-                "Repetition penalty",
-                min_value=0.5,
-                max_value=2.0,
-                value=GENERATION_DEFAULTS["repetition_penalty"],
-                step=0.05,
-                key=widget_key(context_key, "repetition_penalty"),
-            )
+    tools = ChatTools(
+        probe_enabled=probe_enabled,
+        compare_mode=compare_mode,
+        token_contrast=token_contrast and compare_mode,
+    )
+    return generation, tools
 
-        use_sampling = st.checkbox(
-            "Random sampling",
-            value=False,
-            key=widget_key(context_key, "use_sampling"),
+
+@st.fragment
+def _render_generation_fragment(context_key: str, remote: bool) -> GenerationConfig:
+    """Render generation sliders inside a fragment so tweaks don't full-rerun."""
+    config_col1, config_col2 = st.columns([2, 1])
+    with config_col1:
+        max_new_tokens = st.slider(
+            "Max new tokens",
+            min_value=16,
+            max_value=512,
+            step=16,
+            key=_persisted_key(
+                context_key, "max_new_tokens", GENERATION_DEFAULTS["max_new_tokens"]
+            ),
+        )
+    with config_col2:
+        repetition_penalty = st.slider(
+            "Repetition penalty",
+            min_value=0.5,
+            max_value=2.0,
+            step=0.05,
+            key=_persisted_key(
+                context_key,
+                "repetition_penalty",
+                GENERATION_DEFAULTS["repetition_penalty"],
+            ),
         )
 
-        sampling_disabled = not use_sampling
-        sampling_col1, sampling_col2, sampling_col3 = st.columns(3)
-        with sampling_col1:
-            temperature = st.slider(
-                "Temperature",
-                min_value=0.01,
-                max_value=2.0,
-                value=GENERATION_DEFAULTS["temperature"],
-                step=0.01,
-                disabled=sampling_disabled,
-                key=widget_key(context_key, "temperature"),
-            )
-        with sampling_col2:
-            top_p = st.slider(
-                "Top-p",
-                min_value=0.01,
-                max_value=1.0,
-                value=GENERATION_DEFAULTS["top_p"],
-                step=0.01,
-                disabled=sampling_disabled,
-                key=widget_key(context_key, "top_p"),
-            )
-        with sampling_col3:
-            top_k = st.slider(
-                "Top-k (0 = off)",
+    use_sampling = st.checkbox(
+        "Random sampling",
+        key=_persisted_key(context_key, "use_sampling", False),
+    )
+
+    sampling_disabled = not use_sampling
+    sampling_col1, sampling_col2, sampling_col3 = st.columns(3)
+    with sampling_col1:
+        temperature = st.slider(
+            "Temperature",
+            min_value=0.01,
+            max_value=2.0,
+            step=0.01,
+            disabled=sampling_disabled,
+            key=_persisted_key(
+                context_key, "temperature", GENERATION_DEFAULTS["temperature"]
+            ),
+        )
+    with sampling_col2:
+        top_p = st.slider(
+            "Top-p",
+            min_value=0.01,
+            max_value=1.0,
+            step=0.01,
+            disabled=sampling_disabled,
+            key=_persisted_key(context_key, "top_p", GENERATION_DEFAULTS["top_p"]),
+        )
+    with sampling_col3:
+        top_k = st.slider(
+            "Top-k (0 = off)",
+            min_value=0,
+            max_value=100,
+            step=1,
+            disabled=sampling_disabled,
+            key=_persisted_key(context_key, "top_k", GENERATION_DEFAULTS["top_k"]),
+        )
+
+    seed_disabled = sampling_disabled or remote
+    seed_enabled = st.checkbox(
+        "Fix seed",
+        disabled=seed_disabled,
+        key=_persisted_key(context_key, "seed_enabled", False),
+    )
+    seed = None
+    if seed_enabled:
+        seed = int(
+            st.number_input(
+                "Seed",
                 min_value=0,
-                max_value=100,
-                value=GENERATION_DEFAULTS["top_k"],
+                max_value=2_147_483_647,
                 step=1,
-                disabled=sampling_disabled,
-                key=widget_key(context_key, "top_k"),
+                disabled=seed_disabled,
+                key=_persisted_key(context_key, "seed", 0),
             )
-
-        seed_disabled = sampling_disabled or remote
-        seed_enabled = st.checkbox(
-            "Fix seed",
-            value=False,
-            disabled=seed_disabled,
-            key=widget_key(context_key, "seed_enabled"),
         )
-        seed = None
-        if seed_enabled:
-            seed = int(
-                st.number_input(
-                    "Seed",
-                    min_value=0,
-                    max_value=2_147_483_647,
-                    value=0,
-                    step=1,
-                    disabled=seed_disabled,
-                    key=widget_key(context_key, "seed"),
-                )
-            )
 
-        if remote:
-            st.caption("Seed is local-only and disabled for remote runs.")
+    if remote:
+        st.caption("Seed is local-only and disabled for remote runs.")
+
+    for name, value in (
+        ("max_new_tokens", max_new_tokens),
+        ("repetition_penalty", repetition_penalty),
+        ("use_sampling", use_sampling),
+        ("temperature", temperature),
+        ("top_p", top_p),
+        ("top_k", top_k),
+        ("seed_enabled", seed_enabled),
+    ):
+        _remember(name, value)
 
     do_sample = bool(use_sampling)
-    generation = GenerationConfig(
+    return GenerationConfig(
         max_new_tokens=int(max_new_tokens),
         do_sample=do_sample,
         temperature=float(temperature),
@@ -255,12 +309,6 @@ def render_advanced_settings(
         repetition_penalty=float(repetition_penalty),
         seed=seed if do_sample and seed is not None and not remote else None,
     )
-    tools = ChatTools(
-        probe_enabled=probe_enabled,
-        compare_mode=compare_mode,
-        token_contrast=token_contrast and compare_mode,
-    )
-    return generation, tools
 
 
 def render_chat_message(

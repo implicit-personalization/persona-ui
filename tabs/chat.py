@@ -18,18 +18,20 @@ from utils.chat import (
     resolve_system_prompt,
 )
 from utils.chat_export import save_chat_export
-from utils.datasets import load_dataset
+from utils.datasets import load_persona_list
 from utils.helpers import widget_key
 from utils.runtime import cached_model
 
 _LAST_PERSONA_ID_KEY = "chat:last_persona_id"
 _LAST_PROMPT_MODE_KEY = "chat:last_prompt_mode"
 _LAST_COMPARE_MODE_KEY = "chat:last_compare_mode"
+_LAST_PROBE_ENABLED_KEY = "chat:last_probe_enabled"
+_LAST_TOKEN_CONTRAST_KEY = "chat:last_token_contrast"
 
 
 def _load_personas(dataset_source: str) -> list[PersonaData] | None:
     try:
-        dataset, dataset_status = load_dataset(
+        personas, dataset_status = load_persona_list(
             dataset_source,
             personas_file=st.session_state.get("extract__personas_file"),
             qa_file=st.session_state.get("extract__qa_file"),
@@ -40,7 +42,6 @@ def _load_personas(dataset_source: str) -> list[PersonaData] | None:
         st.info("Check the selected dataset source or upload both JSONL files.")
         return None
 
-    personas = list(dataset)
     if not personas:
         st.warning("No personas found in the selected dataset.")
         st.info("Try a different dataset source or upload a non-empty personas file.")
@@ -152,6 +153,8 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         context_key,
         remote,
         last_compare_mode_key=_LAST_COMPARE_MODE_KEY,
+        last_probe_enabled_key=_LAST_PROBE_ENABLED_KEY,
+        last_token_contrast_key=_LAST_TOKEN_CONTRAST_KEY,
     )
     if tools.compare_mode:
         render_compare_mode(
