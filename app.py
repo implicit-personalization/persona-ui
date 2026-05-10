@@ -13,7 +13,7 @@ _LAST_LOCAL_MODEL_KEY = "sidebar:last_local_model"
 _LAST_REMOTE_MODEL_KEY = "sidebar:last_remote_model"
 
 
-_TABS = ["Chat", "Compare", "Extract"]
+_TABS = ["Chat", "Analysis", "Extract"]
 _TAB_ICONS = [":material/chat:", ":material/search:", ":material/tune:"]
 
 
@@ -105,7 +105,7 @@ def _sidebar_controls() -> SidebarState:
                 st.session_state["sidebar__active_tab"] = tab_name
                 st.rerun()
 
-        if active_tab == "Compare":
+        if active_tab == "Analysis":
             model_name = st.session_state.get(_LAST_LOCAL_MODEL_KEY, DEFAULT_MODEL)
             dataset_source = st.session_state.get(
                 "sidebar__dataset_source",
@@ -169,7 +169,7 @@ def main() -> None:
         from tabs.extract import render_extract_tab
 
         render_extract_tab(sidebar.remote, sidebar.model_name, sidebar.dataset_source)
-    elif sidebar.active_tab == "Compare":
+    elif sidebar.active_tab == "Analysis":
         from tabs.compare import render_compare_tab
 
         render_compare_tab()

@@ -12,6 +12,7 @@ from persona_vectors.plots import (
     build_layered_figure,
     build_pair_similarity_figure,
     plot_layer_similarity,
+    plot_persona_dendrogram,
     save_plot_html,
 )
 
@@ -556,6 +557,23 @@ def _render_layered_figure_analysis(
         return
     variant, persona_ids, persona_key, selected_layers = selected
 
+    n_clusters = None
+    if figure_kind in {"pca", "umap"}:
+        use_kmeans = st.toggle(
+            "Color by K-means clusters",
+            value=False,
+            key=widget_key("load", "kmeans_enabled", scope, store_id(store)),
+            help="Run K-means on persona vectors and color each persona by cluster.",
+        )
+        if use_kmeans:
+            n_clusters = st.slider(
+                "K (clusters)",
+                min_value=2,
+                max_value=min(10, len(persona_ids)),
+                value=min(3, len(persona_ids)),
+                key=widget_key("load", "kmeans_k", scope, store_id(store)),
+            )
+
     fig_key = widget_key(
         "load",
         f"{scope}_fig_state",
@@ -564,6 +582,7 @@ def _render_layered_figure_analysis(
         mask_strategy.value,
         figure_kind,
         str(n_components),
+        str(n_clusters),
         variant,
         "persona_vector",
         persona_key,
@@ -581,6 +600,8 @@ def _render_layered_figure_analysis(
             build_kwargs = {}
             if figure_kind in {"umap", "pca"}:
                 build_kwargs["n_components"] = n_components
+                if n_clusters is not None:
+                    build_kwargs["n_clusters"] = n_clusters
             main_fig = build_layered_figure(
                 samples,
                 figure_kind,
@@ -619,6 +640,134 @@ def _render_layered_figure_analysis(
             filenames.append(f"{filename}__pair_trajectories")
         _render_save_buttons(figs, filenames, scope)
         st.success(f"Loaded {n_samples} samples.")
+
+
+_LAST_DENDRO_PERSONAS_KEY = "compare:last_personas:dendro"
+_DENDRO_LINKAGE_OPTIONS = ["ward", "complete", "average", "single"]
+
+
+def _render_dendrogram_analysis(
+    store: Store,
+    mask_strategy: MaskStrategy,
+) -> None:
+    variants = available_variants(store, mask_strategy)
+    if not variants:
+        st.info("No variants with saved vectors for this model.")
+        return
+
+    with st.expander("Variant selection", expanded=True):
+        col1, col2 = st.columns(2)
+        default_a = "biography" if "biography" in variants else variants[0]
+        default_b_idx = variants.index("templated") if "templated" in variants else min(1, len(variants) - 1)
+        with col1:
+            variant_a = st.selectbox(
+                "Variant A",
+                options=variants,
+                index=variants.index(default_a),
+                format_func=prompt_variant_label,
+                key=widget_key("load", "dendro_variant_a", store_id(store)),
+            )
+        with col2:
+            variant_b = st.selectbox(
+                "Variant B",
+                options=variants,
+                index=default_b_idx,
+                format_func=prompt_variant_label,
+                key=widget_key("load", "dendro_variant_b", store_id(store)),
+            )
+
+    shared_variants = list(dict.fromkeys([variant_a, variant_b]))
+    persona_ids = _select_artifact_personas(
+        store,
+        shared_variants,
+        mask_strategy,
+        widget_scope=f"dendro:{store_id(store)}",
+        remember_key=_LAST_DENDRO_PERSONAS_KEY,
+        default_all=True,
+    )
+    if not persona_ids:
+        return
+
+    col_opts1, col_opts2 = st.columns(2)
+    with col_opts1:
+        layered_mode = st.toggle(
+            "Per-layer animated",
+            value=False,
+            key=widget_key("load", "dendro_layered", store_id(store)),
+            help="Animated dendrogram with one frame per layer instead of averaging all layers.",
+        )
+    with col_opts2:
+        linkage = st.selectbox(
+            "Linkage",
+            options=_DENDRO_LINKAGE_OPTIONS,
+            index=0,
+            key=widget_key("load", "dendro_linkage", store_id(store)),
+        )
+
+    persona_key = "_".join(sorted(persona_ids))
+    fig_key = widget_key(
+        "load", "dendro_fig_state",
+        store_id(store),
+        store.model_name,
+        mask_strategy.value,
+        variant_a, variant_b,
+        persona_key,
+        str(layered_mode), linkage,
+    )
+
+    if st.button(
+        "Generate dendrograms",
+        type="primary",
+        key=widget_key("load", "dendro_btn", store_id(store), variant_a, variant_b, persona_key),
+    ):
+        try:
+            samples_a = load_persona_vectors(
+                store, variant_a, mask_strategy=mask_strategy, persona_ids=persona_ids,
+            )
+            fig_a = plot_persona_dendrogram(
+                samples_a,
+                layered=layered_mode,
+                linkage=linkage,
+                title=f"Dendrogram — {prompt_variant_label(variant_a)}",
+            )
+            fig_a.update_layout(height=750)
+            fig_b = None
+            if variant_a != variant_b:
+                samples_b = load_persona_vectors(
+                    store, variant_b, mask_strategy=mask_strategy, persona_ids=persona_ids,
+                )
+                fig_b = plot_persona_dendrogram(
+                    samples_b,
+                    layered=layered_mode,
+                    linkage=linkage,
+                    title=f"Dendrogram — {prompt_variant_label(variant_b)}",
+                )
+                fig_b.update_layout(height=750)
+            st.session_state[fig_key] = (fig_a, fig_b, len(persona_ids), variant_a, variant_b)
+        except Exception as exc:
+            st.error(f"Could not build dendrogram: {exc}")
+            st.session_state.pop(fig_key, None)
+
+    if fig_key in st.session_state:
+        fig_a, fig_b, n_personas, va, vb = st.session_state[fig_key]
+        if fig_b is not None:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.subheader(prompt_variant_label(va))
+                st.plotly_chart(fig_a, width="stretch")
+            with col_b:
+                st.subheader(prompt_variant_label(vb))
+                st.plotly_chart(fig_b, width="stretch")
+        else:
+            st.plotly_chart(fig_a, width="stretch")
+
+        figs = [fig_a] + ([fig_b] if fig_b else [])
+        filenames = [
+            _filename("dendro", store.model_name, mask_strategy.value, va),
+            *([_filename("dendro", store.model_name, mask_strategy.value, vb)] if fig_b else []),
+        ]
+        _render_save_buttons(figs, filenames, "dendro")
+        st.success(f"Generated dendrogram(s) for {n_personas} persona(s).")
 
 
 def _render_source_select() -> str:
@@ -765,10 +914,10 @@ def _build_store(source: str, mask_strategy: MaskStrategy) -> Store:
 
 
 def render_compare_tab() -> None:
-    """Render the compare tab."""
+    """Render the analysis tab."""
 
-    st.title("Compare")
-    st.caption("Compare persona vectors by cosine similarity, PCA, or UMAP.")
+    st.title("Analysis")
+    st.caption("Analyse persona vectors by cosine similarity, PCA, UMAP, or hierarchical clustering.")
 
     source = _render_source_select()
 
@@ -802,6 +951,10 @@ def render_compare_tab() -> None:
             ),
             include_pair_trajectories=True,
         )
+        return
+
+    if analysis_mode == "Dendrogram":
+        _render_dendrogram_analysis(store, mask_strategy)
         return
 
     dimension_choice = st.segmented_control(
