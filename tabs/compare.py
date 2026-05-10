@@ -7,7 +7,6 @@ import streamlit as st
 from persona_data.environment import get_artifacts_dir
 from persona_data.synth_persona import BASELINE_PERSONA_ID
 from persona_vectors.analysis import load_persona_vectors, load_variant_vectors
-from persona_vectors.artifacts import HFActivationStore
 from persona_vectors.extraction import MaskStrategy
 from persona_vectors.plots import (
     build_layered_figure,
@@ -25,15 +24,14 @@ from utils.compare_sources import (
     Store,
     activation_store_cached,
     available_variants,
-    hub_layers_cached,
     hub_models_by_mask_strategy,
-    list_layers_cached,
     local_model_matches,
     local_model_options_cached,
     persona_names_cached,
     personas_cached,
     store_cache_parts,
     store_id,
+    store_layers_cached,
 )
 from utils.controls import render_mask_strategy_select
 from utils.helpers import (
@@ -87,22 +85,14 @@ def _layers_for_variant(
     persona_ids: list[str],
     mask_strategy: MaskStrategy,
 ) -> list[int]:
-    if isinstance(store, HFActivationStore):
-        if not persona_ids:
-            return []
-        return hub_layers_cached(
-            store.repo_id,
-            store.model_name,
-            mask_strategy.value,
-            variant,
-            persona_ids[0],
-        )
-    return list_layers_cached(
-        str(store.root_dir),
-        store.model_name,
-        [variant],
-        persona_ids,
-        mask_strategy=mask_strategy,
+    source, location, model_name = store_cache_parts(store)
+    return store_layers_cached(
+        source,
+        location,
+        model_name,
+        mask_strategy.value,
+        (variant,),
+        tuple(persona_ids),
     )
 
 

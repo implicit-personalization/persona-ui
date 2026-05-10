@@ -1,8 +1,8 @@
 import html
 from dataclasses import dataclass
 
-from catppuccin import PALETTE
 import streamlit as st
+from catppuccin import PALETTE
 from persona_data.prompts import format_prompt
 from persona_data.synth_persona import BASELINE_PERSONA_ID, PersonaData, QAPair
 from persona_vectors.artifacts import PERSONA_VARIANTS
