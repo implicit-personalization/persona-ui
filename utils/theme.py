@@ -5,6 +5,10 @@ import plotly.io as pio
 from catppuccin import PALETTE
 
 
+def _flavor(base: str | None):
+    return PALETTE.latte if base == "light" else PALETTE.mocha
+
+
 def install_catppuccin_theme(base: str | None = None) -> None:
     """Register a Catppuccin template and alias it as ``plotly_white``.
 
@@ -12,8 +16,7 @@ def install_catppuccin_theme(base: str | None = None) -> None:
     every figure, so replacing that entry themes all plots without any
     per-figure code.
     """
-    flavor = PALETTE.latte if base == "light" else PALETTE.mocha
-    c = flavor.colors
+    c = _flavor(base).colors
     bg, surface, line = c.base.hex, c.surface0.hex, c.surface1.hex
     text, subtext = c.text.hex, c.subtext1.hex
 
@@ -65,3 +68,33 @@ def install_catppuccin_theme(base: str | None = None) -> None:
     pio.templates["catppuccin"] = template
     pio.templates["plotly_white"] = template
     pio.templates.default = "catppuccin"
+
+
+def style_plotly_layer_controls(fig: go.Figure, base: str | None = None) -> go.Figure:
+    """Theme persona-vectors layer sliders/buttons for this Streamlit app."""
+    c = _flavor(base).colors
+    surface = c.surface0.hex
+    overlay = c.surface1.hex
+    text = c.text.hex
+    primary = c.blue.hex
+
+    for slider in fig.layout.sliders:
+        slider.bgcolor = surface
+        slider.activebgcolor = primary
+        slider.bordercolor = overlay
+        slider.borderwidth = 1
+        slider.font = dict(color=text, size=11)
+        slider.tickcolor = primary
+        slider.currentvalue = dict(
+            slider.currentvalue.to_plotly_json(),
+            font=dict(color=text, size=13),
+        )
+
+    for menu in fig.layout.updatemenus:
+        if menu.type != "buttons":
+            continue
+        menu.bgcolor = surface
+        menu.bordercolor = overlay
+        menu.font = dict(color=text, size=13)
+
+    return fig

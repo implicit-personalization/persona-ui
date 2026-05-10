@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
 
+import plotly.graph_objects as go
 import streamlit as st
 from persona_data.environment import get_artifacts_dir
 from persona_data.synth_persona import BASELINE_PERSONA_ID
@@ -44,6 +45,7 @@ from utils.helpers import (
     slugify,
     widget_key,
 )
+from utils.theme import style_plotly_layer_controls
 
 
 def _filename(*parts: str) -> str:
@@ -295,10 +297,23 @@ def _render_save_buttons(
     """Render the Save HTML button for one or more figures."""
     if st.button("Save HTML", key=widget_key("load", "save_html", key_suffix)):
         try:
+            _style_plotly_figures(figs)
             paths = [save_plot_html(fig, fn) for fig, fn in zip(figs, filenames)]
             st.success(f"Saved {len(paths)} HTML file(s) to `artifacts/plots`.")
         except Exception as exc:
             st.error(f"Could not save HTML: {exc}")
+
+
+def _style_plotly_figures(figs: list[object]) -> None:
+    base = st.get_option("theme.base")
+    for fig in figs:
+        if isinstance(fig, go.Figure):
+            style_plotly_layer_controls(fig, base)
+
+
+def _plotly_chart(fig: object) -> None:
+    _style_plotly_figures([fig])
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_mask_strategy_select(scope: str) -> MaskStrategy:
@@ -494,12 +509,12 @@ def _render_cosine_similarity(
 
     if cosine_fig_key in st.session_state:
         fig, pair_fig, n_traces, n_pair_traces = st.session_state[cosine_fig_key]
-        st.plotly_chart(fig, width="stretch")
+        _plotly_chart(fig)
         figs = [fig]
         filenames = [filename]
         if pair_fig is not None:
             st.subheader("Variant pairs")
-            st.plotly_chart(pair_fig, width="stretch")
+            _plotly_chart(pair_fig)
             figs.append(pair_fig)
             filenames.append(pairs_filename)
         _render_save_buttons(figs, filenames, "cosine")
@@ -662,12 +677,12 @@ def _render_layered_figure_analysis(
 
     if fig_key in st.session_state:
         main_fig, extra_fig, n_samples = st.session_state[fig_key]
-        st.plotly_chart(main_fig, width="stretch")
+        _plotly_chart(main_fig)
         figs = [main_fig]
         filenames = [filename]
         if extra_fig is not None:
             st.subheader("Pair trajectories")
-            st.plotly_chart(extra_fig, width="stretch")
+            _plotly_chart(extra_fig)
             figs.append(extra_fig)
             filenames.append(f"{filename}__pair_trajectories")
         _render_save_buttons(figs, filenames, scope)
@@ -816,12 +831,12 @@ def _render_dendrogram_analysis(
             col_a, col_b = st.columns(2)
             with col_a:
                 st.subheader(prompt_variant_label(va))
-                st.plotly_chart(fig_a, width="stretch")
+                _plotly_chart(fig_a)
             with col_b:
                 st.subheader(prompt_variant_label(vb))
-                st.plotly_chart(fig_b, width="stretch")
+                _plotly_chart(fig_b)
         else:
-            st.plotly_chart(fig_a, width="stretch")
+            _plotly_chart(fig_a)
 
         figs = [fig_a] + ([fig_b] if fig_b else [])
         filenames = [
