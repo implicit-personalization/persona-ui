@@ -22,7 +22,7 @@ SOURCE_LOCAL = "Local activations"
 SOURCES = (SOURCE_HUB, SOURCE_LOCAL)
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False, max_entries=1)
 def activation_store_cached(
     source: str,
     location: str,
@@ -35,7 +35,7 @@ def activation_store_cached(
     return ActivationStore(model_name, location, mask_strategy=mask_strategy)
 
 
-@st.cache_data(show_spinner=False, ttl=10)
+@st.cache_data(show_spinner=False)
 def available_variants_cached(
     source: str,
     location: str,
@@ -46,7 +46,7 @@ def available_variants_cached(
     return store.available_variants()
 
 
-@st.cache_data(show_spinner=False, ttl=10)
+@st.cache_data(show_spinner=False)
 def personas_cached(
     source: str,
     location: str,
@@ -61,7 +61,7 @@ def personas_cached(
     )
 
 
-@st.cache_data(show_spinner=False, ttl=10)
+@st.cache_data(show_spinner=False)
 def persona_names_cached(
     source: str,
     location: str,
@@ -78,7 +78,7 @@ def persona_names_cached(
     )
 
 
-@st.cache_data(show_spinner=False, ttl=10)
+@st.cache_data(show_spinner=False)
 def local_model_options_cached(
     artifacts_root: str, mask_strategy_value: str
 ) -> list[str]:

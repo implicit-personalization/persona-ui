@@ -5,7 +5,7 @@ description = "Streamlit UI for persona-vectors"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "persona-vectors>=0.7.0",
+    "persona-vectors>=0.7.2",
     "persona-data>=0.4.2",
     "datasets>=4.8.5",
     "huggingface-hub>=1.14.0",

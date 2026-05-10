@@ -11,6 +11,7 @@ from persona_vectors.extraction import MaskStrategy
 from persona_vectors.plots import (
     build_layered_figure,
     build_pair_similarity_figure,
+    build_similarity_figures,
     plot_layer_similarity,
     plot_persona_dendrogram,
     save_plot_html,
@@ -38,6 +39,7 @@ from utils.controls import render_mask_strategy_select
 from utils.helpers import (
     ANALYSIS_HELP_TEXT,
     ANALYSIS_MODES,
+    personas_fingerprint,
     prompt_variant_label,
     slugify,
     widget_key,
@@ -171,9 +173,7 @@ def _seed_persona_memory(
     )
     remembered_count = int(st.session_state.get(remembered_count_key, default_count))
     persona_count = min(max(remembered_count, 0), len(options.regular_ids))
-    include_assistant = bool(
-        st.session_state.get(remembered_assistant_key, options.assistant_id is not None)
-    )
+    include_assistant = bool(st.session_state.get(remembered_assistant_key, False))
     return persona_count, include_assistant
 
 
@@ -355,7 +355,7 @@ def _render_cosine_selection(
         variant_a=variant_a,
         variant_b=variant_b,
         persona_ids=persona_ids,
-        persona_key="_".join(sorted(persona_ids)),
+        persona_key=personas_fingerprint(persona_ids),
     )
 
 
@@ -363,30 +363,31 @@ def _build_cosine_figures(
     store: Store,
     selection: CosineSelection,
 ) -> tuple[object, object | None, int, int] | None:
-    variant_sample_cache = {}
+    variant_sample_cache: dict[str, object] = {}
 
-    def _load_pair(left: str, right: str):
-        key = tuple(sorted((left, right)))
-        if key not in variant_sample_cache:
-            variant_sample_cache[key] = load_variant_vectors(
+    def _load_variant(variant: str):
+        if variant not in variant_sample_cache:
+            samples = load_variant_vectors(
                 store,
-                [left, right],
+                [variant],
                 persona_ids=selection.persona_ids,
             )
-        return variant_sample_cache[key]
+            variant_sample_cache[variant] = samples[variant]
+        return variant_sample_cache[variant]
 
     try:
-        variant_samples = _load_pair(selection.variant_a, selection.variant_b)
+        samples_a = _load_variant(selection.variant_a)
+        samples_b = _load_variant(selection.variant_b)
     except Exception as exc:
         st.error(f"Could not load vectors: {exc}")
         return None
 
-    labels = variant_samples[selection.variant_a].labels
+    labels = samples_a.labels
     display_traces = [
         (
             label,
-            variant_samples[selection.variant_a].vectors[index],
-            variant_samples[selection.variant_b].vectors[index],
+            samples_a.vectors[index],
+            samples_b.vectors[index],
         )
         for index, label in enumerate(labels)
     ]
@@ -403,12 +404,13 @@ def _build_cosine_figures(
     pair_errors = []
     for left, right in combinations(selection.variants, 2):
         try:
-            pair_samples = _load_pair(left, right)
+            left_samples = _load_variant(left)
+            right_samples = _load_variant(right)
             pair_traces.append(
                 (
                     f"{prompt_variant_label(left)} vs {prompt_variant_label(right)}",
-                    pair_samples[left].vectors.mean(dim=0),
-                    pair_samples[right].vectors.mean(dim=0),
+                    left_samples.vectors.mean(dim=0),
+                    right_samples.vectors.mean(dim=0),
                 )
             )
         except Exception as exc:
@@ -477,11 +479,18 @@ def _render_cosine_similarity(
             selection.persona_key,
         ),
     ):
-        figures = _build_cosine_figures(store, selection)
-        if figures is None:
-            st.session_state.pop(cosine_fig_key, None)
-            return
-        st.session_state[cosine_fig_key] = figures
+        progress = st.progress(0, text="Loading activation vectors…")
+        try:
+            progress.progress(15, text="Loading activation vectors…")
+            figures = _build_cosine_figures(store, selection)
+            if figures is None:
+                st.session_state.pop(cosine_fig_key, None)
+                return
+            progress.progress(90, text="Storing figure state…")
+            st.session_state[cosine_fig_key] = figures
+            progress.progress(100, text="Done.")
+        finally:
+            progress.empty()
 
     if cosine_fig_key in st.session_state:
         fig, pair_fig, n_traces, n_pair_traces = st.session_state[cosine_fig_key]
@@ -526,7 +535,7 @@ def _select_single_variant_samples(
     if not persona_ids:
         return None
 
-    persona_key = "_".join(sorted(persona_ids))
+    persona_key = personas_fingerprint(persona_ids)
     layer_options = _layers_for_variant(store, variant, persona_ids, mask_strategy)
     if not layer_options:
         st.info("No shared layers are available for the selected personas.")
@@ -590,43 +599,66 @@ def _render_layered_figure_analysis(
     filename = scope
 
     if st.button(button_label, type="primary"):
+        build_label = {
+            "umap": "Computing UMAP projections…",
+            "pca": "Computing PCA projections…",
+            "similarity": "Computing similarity matrices…",
+        }.get(figure_kind, "Building figure…")
+        progress = st.progress(0, text="Loading activation vectors…")
         try:
+            progress.progress(15, text="Loading activation vectors…")
             samples = load_persona_vectors(
                 store,
                 variant,
                 mask_strategy=mask_strategy,
                 persona_ids=persona_ids,
             )
+            progress.progress(55, text=build_label)
             build_kwargs = {}
             if figure_kind in {"umap", "pca"}:
                 build_kwargs["n_components"] = n_components
                 if n_clusters is not None:
                     build_kwargs["n_clusters"] = n_clusters
-            main_fig = build_layered_figure(
-                samples,
-                figure_kind,
-                layers=selected_layers,
-                title=title_fn(variant),
-                **build_kwargs,
-            )
-            if figure_kind in {"umap", "pca"}:
-                main_fig.update_layout(height=700)
-            extra_fig = (
-                build_pair_similarity_figure(
+            if figure_kind == "similarity" and include_pair_trajectories:
+                main_fig, extra_fig = build_similarity_figures(
                     samples,
                     layers=selected_layers,
-                    title=(
+                    title=title_fn(variant),
+                    pair_title=(
                         "Pair similarity trajectories - "
                         f"{prompt_variant_label(variant)} - persona vectors"
                     ),
                 )
-                if include_pair_trajectories
-                else None
-            )
+            else:
+                main_fig = build_layered_figure(
+                    samples,
+                    figure_kind,
+                    layers=selected_layers,
+                    title=title_fn(variant),
+                    **build_kwargs,
+                )
+                if figure_kind in {"umap", "pca"}:
+                    main_fig.update_layout(height=700)
+                extra_fig = (
+                    build_pair_similarity_figure(
+                        samples,
+                        layers=selected_layers,
+                        title=(
+                            "Pair similarity trajectories - "
+                            f"{prompt_variant_label(variant)} - persona vectors"
+                        ),
+                    )
+                    if include_pair_trajectories
+                    else None
+                )
+            progress.progress(90, text="Storing figure state…")
             st.session_state[fig_key] = (main_fig, extra_fig, samples.vectors.shape[0])
+            progress.progress(100, text="Done.")
         except Exception as exc:
             st.error(f"Could not build figure: {exc}")
             st.session_state.pop(fig_key, None)
+        finally:
+            progress.empty()
 
     if fig_key in st.session_state:
         main_fig, extra_fig, n_samples = st.session_state[fig_key]
@@ -658,7 +690,11 @@ def _render_dendrogram_analysis(
     with st.expander("Variant selection", expanded=True):
         col1, col2 = st.columns(2)
         default_a = "biography" if "biography" in variants else variants[0]
-        default_b_idx = variants.index("templated") if "templated" in variants else min(1, len(variants) - 1)
+        default_b_idx = (
+            variants.index("templated")
+            if "templated" in variants
+            else min(1, len(variants) - 1)
+        )
         with col1:
             variant_a = st.selectbox(
                 "Variant A",
@@ -704,26 +740,37 @@ def _render_dendrogram_analysis(
             key=widget_key("load", "dendro_linkage", store_id(store)),
         )
 
-    persona_key = "_".join(sorted(persona_ids))
+    persona_key = personas_fingerprint(persona_ids)
     fig_key = widget_key(
-        "load", "dendro_fig_state",
+        "load",
+        "dendro_fig_state",
         store_id(store),
         store.model_name,
         mask_strategy.value,
-        variant_a, variant_b,
+        variant_a,
+        variant_b,
         persona_key,
-        str(layered_mode), linkage,
+        str(layered_mode),
+        linkage,
     )
 
     if st.button(
         "Generate dendrograms",
         type="primary",
-        key=widget_key("load", "dendro_btn", store_id(store), variant_a, variant_b, persona_key),
+        key=widget_key(
+            "load", "dendro_btn", store_id(store), variant_a, variant_b, persona_key
+        ),
     ):
+        progress = st.progress(0, text="Loading first variant vectors…")
         try:
+            progress.progress(15, text="Loading first variant vectors…")
             samples_a = load_persona_vectors(
-                store, variant_a, mask_strategy=mask_strategy, persona_ids=persona_ids,
+                store,
+                variant_a,
+                mask_strategy=mask_strategy,
+                persona_ids=persona_ids,
             )
+            progress.progress(40, text="Building first dendrogram…")
             fig_a = plot_persona_dendrogram(
                 samples_a,
                 layered=layered_mode,
@@ -733,9 +780,14 @@ def _render_dendrogram_analysis(
             fig_a.update_layout(height=750)
             fig_b = None
             if variant_a != variant_b:
+                progress.progress(60, text="Loading second variant vectors…")
                 samples_b = load_persona_vectors(
-                    store, variant_b, mask_strategy=mask_strategy, persona_ids=persona_ids,
+                    store,
+                    variant_b,
+                    mask_strategy=mask_strategy,
+                    persona_ids=persona_ids,
                 )
+                progress.progress(75, text="Building second dendrogram…")
                 fig_b = plot_persona_dendrogram(
                     samples_b,
                     layered=layered_mode,
@@ -743,10 +795,20 @@ def _render_dendrogram_analysis(
                     title=f"Dendrogram — {prompt_variant_label(variant_b)}",
                 )
                 fig_b.update_layout(height=750)
-            st.session_state[fig_key] = (fig_a, fig_b, len(persona_ids), variant_a, variant_b)
+            progress.progress(90, text="Storing figure state…")
+            st.session_state[fig_key] = (
+                fig_a,
+                fig_b,
+                len(persona_ids),
+                variant_a,
+                variant_b,
+            )
+            progress.progress(100, text="Done.")
         except Exception as exc:
             st.error(f"Could not build dendrogram: {exc}")
             st.session_state.pop(fig_key, None)
+        finally:
+            progress.empty()
 
     if fig_key in st.session_state:
         fig_a, fig_b, n_personas, va, vb = st.session_state[fig_key]
@@ -764,7 +826,11 @@ def _render_dendrogram_analysis(
         figs = [fig_a] + ([fig_b] if fig_b else [])
         filenames = [
             _filename("dendro", store.model_name, mask_strategy.value, va),
-            *([_filename("dendro", store.model_name, mask_strategy.value, vb)] if fig_b else []),
+            *(
+                [_filename("dendro", store.model_name, mask_strategy.value, vb)]
+                if fig_b
+                else []
+            ),
         ]
         _render_save_buttons(figs, filenames, "dendro")
         st.success(f"Generated dendrogram(s) for {n_personas} persona(s).")
@@ -917,7 +983,9 @@ def render_compare_tab() -> None:
     """Render the analysis tab."""
 
     st.title("Analysis")
-    st.caption("Analyse persona vectors by cosine similarity, PCA, UMAP, or hierarchical clustering.")
+    st.caption(
+        "Analyse persona vectors by cosine similarity, PCA, UMAP, or hierarchical clustering."
+    )
 
     source = _render_source_select()
 

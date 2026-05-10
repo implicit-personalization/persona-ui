@@ -92,7 +92,7 @@ def _render_variant_controls(
     )
     include_baseline = st.checkbox(
         "Extract Assistant baseline",
-        value=st.session_state.get(_LAST_BASELINE_KEY, True),
+        value=st.session_state.get(_LAST_BASELINE_KEY, False),
         key=_extract_widget_key(model_name, remote, dataset_source, "baseline"),
         help="Also extract the Assistant baseline persona using the first persona's QA set.",
     )

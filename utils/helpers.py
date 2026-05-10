@@ -1,4 +1,6 @@
+import hashlib
 import re
+from collections.abc import Iterable
 
 from persona_data.synth_persona import PersonaData
 
@@ -52,6 +54,18 @@ def widget_key(*parts: str) -> str:
     """Generate a namespaced Streamlit widget key from parts."""
 
     return "::".join(parts)
+
+
+def personas_fingerprint(persona_ids: Iterable[str]) -> str:
+    """Stable short fingerprint for a set of persona ids.
+
+    Used as a discriminator in widget keys and session-state keys. At ~1k
+    personas, joining ids would produce ~20 KB strings; the sha1 prefix is
+    fixed-length and keeps tracebacks readable.
+    """
+
+    joined = "|".join(sorted(persona_ids))
+    return hashlib.sha1(joined.encode()).hexdigest()[:16]
 
 
 def prompt_variant_label(variant: str) -> str:

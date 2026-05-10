@@ -1594,7 +1594,7 @@ requires-dist = [
     { name = "datasets", specifier = ">=4.8.5" },
     { name = "huggingface-hub", specifier = ">=1.14.0" },
     { name = "persona-data", specifier = ">=0.4.2" },
-    { name = "persona-vectors", specifier = ">=0.7.0" },
+    { name = "persona-vectors", specifier = ">=0.7.2" },
     { name = "plotly", specifier = ">=6.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "streamlit", specifier = ">=1.44.0" },
@@ -1602,7 +1602,7 @@ requires-dist = [
 
 [[package]]
 name = "persona-vectors"
-version = "0.7.0"
+version = "0.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "datasets" },
@@ -1621,9 +1621,9 @@ dependencies = [
     { name = "transformers" },
     { name = "umap-learn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/21/03/c419bd2809447ae3de0dfbe06de8c7462a141feebaea7157f2e64a119416/persona_vectors-0.7.0.tar.gz", hash = "sha256:b3bb10d61fb58e7a151a2f715a3bf3afecc6a2e30da85b73ccb5e5485109909b", size = 27499, upload-time = "2026-05-10T08:59:29.558Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/ee/3550a015546ad9e7842e4d94346e2268c1aa65a7278f39ab574dd2b702bd/persona_vectors-0.7.2.tar.gz", hash = "sha256:22f3e4349bd020fcc287ed5e00ff9d0b752dfe95b3f145b8778efc485cf7f67f", size = 27777, upload-time = "2026-05-10T10:29:07.67Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3f/cf/5603631767d29cff21a7b02fb21f4ca53b85bc4369bb0a5060bdee01ee4e/persona_vectors-0.7.0-py3-none-any.whl", hash = "sha256:89c3ddd1f1a0ffc0dfce59319ce9417e0764011f8680fd2e7844fbea2ee75afe", size = 32116, upload-time = "2026-05-10T08:59:28.674Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/c2/334c66944f1669c7cc19e4e3c2f49ab65b0a186e6cd6cb709afd253b4268/persona_vectors-0.7.2-py3-none-any.whl", hash = "sha256:cbd5b6de2afb17fccef9414eba1b0096ffa3407a1496b253bb2d30ed548d123e", size = 32387, upload-time = "2026-05-10T10:29:06.808Z" },
 ]
 
 [[package]]
