@@ -1,3 +1,4 @@
+import gc
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import combinations
@@ -7,7 +8,6 @@ import plotly.graph_objects as go
 import streamlit as st
 from persona_data.environment import get_artifacts_dir
 from persona_data.synth_persona import BASELINE_PERSONA_ID
-from persona_vectors.analysis import load_persona_vectors, load_variant_vectors
 from persona_vectors.extraction import MaskStrategy
 from persona_vectors.plots import (
     build_layered_figure,
@@ -28,10 +28,13 @@ from utils.compare_sources import (
     activation_store_cached,
     available_variants,
     hub_models_by_mask_strategy,
+    load_persona_vectors_lean,
+    load_variant_vectors_lean,
     local_model_matches,
     local_model_options_cached,
     persona_names_cached,
     personas_cached,
+    release_store_cache,
     store_cache_parts,
     store_id,
     store_layers_cached,
@@ -56,8 +59,19 @@ def _filename(*parts: str) -> str:
 # overwrite cosine similarity defaults.
 _LAST_COSINE_PERSONAS_KEY = "compare:last_personas:cosine"
 _LAST_PROJECTION_PERSONAS_KEY = "compare:last_personas:projection"
+_LAST_SIMILARITY_PERSONAS_KEY = "compare:last_personas:similarity"
 _LAST_MASK_STRATEGY_KEY = "compare:last_mask_strategy"
 _LAST_SOURCE_KEY = "compare:last_source"
+
+_DEFAULT_LAYER_FRAMES = 16
+_DEFAULT_PERSONA_LIMITS = {
+    "similarity": 120,
+    "pca": 500,
+    "umap": 500,
+    "dendro": 160,
+}
+_MAX_SIMILARITY_CELLS = 4_000_000
+_MAX_PAIR_TRAJECTORY_TRACES = 500
 
 
 def _is_assistant_persona(persona_id: str, persona_name: str | None = None) -> bool:
@@ -99,6 +113,92 @@ def _layers_for_variant(
         (variant,),
         tuple(persona_ids),
     )
+
+
+def _load_persona_vectors(
+    store: Store,
+    variant: str,
+    mask_strategy: MaskStrategy,
+    persona_ids: list[str],
+):
+    source, location, model_name = store_cache_parts(store)
+    return load_persona_vectors_lean(
+        source,
+        location,
+        model_name,
+        mask_strategy.value,
+        variant,
+        tuple(persona_ids),
+    )
+
+
+def _load_variant_vectors(
+    store: Store,
+    variants: list[str] | tuple[str, ...],
+    mask_strategy: MaskStrategy,
+    persona_ids: list[str],
+):
+    source, location, model_name = store_cache_parts(store)
+    return load_variant_vectors_lean(
+        source,
+        location,
+        model_name,
+        mask_strategy.value,
+        tuple(variants),
+        tuple(persona_ids),
+    )
+
+
+def _clear_old_figure_states(current_key: str) -> None:
+    for key in list(st.session_state):
+        if key == current_key or not isinstance(key, str):
+            continue
+        parts = key.split("::", 2)
+        if len(parts) >= 2 and parts[0] == "load" and parts[1].endswith("_fig_state"):
+            st.session_state.pop(key, None)
+
+
+def _store_figure_state(key: str, value: object) -> None:
+    _clear_old_figure_states(key)
+    st.session_state[key] = value
+
+
+def _release_vector_memory(store: Store, variants: list[str] | tuple[str, ...]) -> None:
+    release_store_cache(store, variants)
+    gc.collect()
+
+
+def _evenly_spaced_layers(layers: list[int], max_count: int) -> list[int]:
+    if max_count >= len(layers):
+        return layers
+    if max_count <= 1:
+        return [layers[0]]
+
+    last = len(layers) - 1
+    indices = [round(i * last / (max_count - 1)) for i in range(max_count)]
+    return [layers[index] for index in dict.fromkeys(indices)]
+
+
+def _render_layer_frame_controls(
+    store: Store,
+    scope: str,
+    layers: list[int],
+) -> list[int]:
+    if len(layers) <= _DEFAULT_LAYER_FRAMES:
+        st.caption(f"Using all {len(layers)} available layer(s).")
+        return layers
+
+    frame_count = st.slider(
+        "Layer frames",
+        min_value=2,
+        max_value=len(layers),
+        value=_DEFAULT_LAYER_FRAMES,
+        key=widget_key("load", "layer_frames", scope, store_id(store)),
+        help="Limit animated Plotly frames to keep browser and RAM usage bounded.",
+    )
+    selected = _evenly_spaced_layers(layers, frame_count)
+    st.caption(f"Using {len(selected)} of {len(layers)} layers.")
+    return selected
 
 
 def _load_persona_options(
@@ -156,6 +256,7 @@ def _seed_persona_memory(
     options: PersonaOptions,
     *,
     default_all: bool,
+    default_count_limit: int | None = None,
 ) -> tuple[int, bool]:
     remembered_count_key = f"{remember_key}:count"
     remembered_assistant_key = f"{remember_key}:include_assistant"
@@ -170,9 +271,12 @@ def _seed_persona_memory(
             options.assistant_id in legacy_ids,
         )
 
-    default_count = (
-        len(options.regular_ids) if default_all else min(1, len(options.regular_ids))
-    )
+    if default_count_limit is not None:
+        default_count = min(default_count_limit, len(options.regular_ids))
+    elif default_all:
+        default_count = len(options.regular_ids)
+    else:
+        default_count = min(1, len(options.regular_ids))
     remembered_count = int(st.session_state.get(remembered_count_key, default_count))
     persona_count = min(max(remembered_count, 0), len(options.regular_ids))
     include_assistant = bool(st.session_state.get(remembered_assistant_key, False))
@@ -236,6 +340,7 @@ def _select_artifact_personas(
     widget_scope: str,
     remember_key: str,
     default_all: bool = False,
+    default_count_limit: int | None = None,
 ) -> list[str]:
     empty_message = (
         "No personas have vectors for all selected variants. "
@@ -256,6 +361,7 @@ def _select_artifact_personas(
         remember_key,
         options,
         default_all=default_all,
+        default_count_limit=default_count_limit,
     )
     persona_count, include_assistant = _render_persona_count_controls(
         store,
@@ -376,15 +482,17 @@ def _render_cosine_selection(
 
 def _build_cosine_figures(
     store: Store,
+    mask_strategy: MaskStrategy,
     selection: CosineSelection,
 ) -> tuple[object, object | None, int, int] | None:
     variant_sample_cache: dict[str, object] = {}
 
     def _load_variant(variant: str):
         if variant not in variant_sample_cache:
-            samples = load_variant_vectors(
+            samples = _load_variant_vectors(
                 store,
                 [variant],
+                mask_strategy,
                 persona_ids=selection.persona_ids,
             )
             variant_sample_cache[variant] = samples[variant]
@@ -479,6 +587,7 @@ def _render_cosine_similarity(
         mask_strategy.value,
         "_".join(selection.variants),
     )
+    _clear_old_figure_states(cosine_fig_key)
 
     if st.button(
         "Compare vectors",
@@ -497,14 +606,15 @@ def _render_cosine_similarity(
         progress = st.progress(0, text="Loading activation vectors…")
         try:
             progress.progress(15, text="Loading activation vectors…")
-            figures = _build_cosine_figures(store, selection)
+            figures = _build_cosine_figures(store, mask_strategy, selection)
             if figures is None:
                 st.session_state.pop(cosine_fig_key, None)
                 return
             progress.progress(90, text="Storing figure state…")
-            st.session_state[cosine_fig_key] = figures
+            _store_figure_state(cosine_fig_key, figures)
             progress.progress(100, text="Done.")
         finally:
+            _release_vector_memory(store, selection.variants)
             progress.empty()
 
     if cosine_fig_key in st.session_state:
@@ -527,6 +637,9 @@ def _select_single_variant_samples(
     store: Store,
     mask_strategy: MaskStrategy,
     scope: str,
+    *,
+    remember_key: str,
+    default_count_limit: int,
 ) -> tuple[str, list[str], str, list[int]] | None:
     variants = available_variants(store, mask_strategy)
     if not variants:
@@ -544,8 +657,8 @@ def _select_single_variant_samples(
         [variant],
         mask_strategy,
         widget_scope=f"{scope}:{store_id(store)}",
-        remember_key=_LAST_PROJECTION_PERSONAS_KEY,
-        default_all=True,
+        remember_key=remember_key,
+        default_count_limit=default_count_limit,
     )
     if not persona_ids:
         return None
@@ -556,8 +669,8 @@ def _select_single_variant_samples(
         st.info("No shared layers are available for the selected personas.")
         return None
 
-    st.caption(f"Using all {len(layer_options)} available layer(s).")
-    return variant, persona_ids, persona_key, layer_options
+    selected_layers = _render_layer_frame_controls(store, scope, layer_options)
+    return variant, persona_ids, persona_key, selected_layers
 
 
 def _render_layered_figure_analysis(
@@ -570,16 +683,49 @@ def _render_layered_figure_analysis(
     title_fn: Callable[[str], str],
     include_pair_trajectories: bool = False,
     n_components: int = 2,
+    remember_key: str = _LAST_PROJECTION_PERSONAS_KEY,
+    default_count_limit: int = 500,
 ) -> None:
     """Render a single-variant layered analysis: select → button → figure(s).
 
     Used for similarity matrix, PCA, and UMAP. Set ``include_pair_trajectories``
     to add the pair-similarity-trajectory figure (similarity matrix only).
     """
-    selected = _select_single_variant_samples(store, mask_strategy, scope)
+    selected = _select_single_variant_samples(
+        store,
+        mask_strategy,
+        scope,
+        remember_key=remember_key,
+        default_count_limit=default_count_limit,
+    )
     if selected is None:
         return
     variant, persona_ids, persona_key, selected_layers = selected
+
+    pair_trajectories = False
+    if include_pair_trajectories:
+        pair_count = len(persona_ids) * (len(persona_ids) - 1) // 2
+        if pair_count > _MAX_PAIR_TRAJECTORY_TRACES:
+            st.caption(
+                "Pair trajectories hidden because this selection would create "
+                f"{pair_count:,} Plotly traces."
+            )
+        else:
+            pair_trajectories = st.checkbox(
+                "Pair trajectories",
+                value=False,
+                key=widget_key("load", "pair_trajectories", scope, store_id(store)),
+                help="Adds one line per persona pair. Keep this off for larger selections.",
+            )
+
+    if figure_kind == "similarity":
+        similarity_cells = len(persona_ids) * len(persona_ids) * len(selected_layers)
+        if similarity_cells > _MAX_SIMILARITY_CELLS:
+            st.error(
+                "Reduce personas or layer frames before generating the similarity "
+                f"matrix ({similarity_cells:,} cells selected)."
+            )
+            return
 
     n_clusters = None
     if figure_kind in {"pca", "umap"}:
@@ -610,8 +756,11 @@ def _render_layered_figure_analysis(
         variant,
         "persona_vector",
         persona_key,
+        "_".join(map(str, selected_layers)),
+        str(pair_trajectories),
     )
     filename = scope
+    _clear_old_figure_states(fig_key)
 
     if st.button(button_label, type="primary"):
         build_label = {
@@ -622,11 +771,11 @@ def _render_layered_figure_analysis(
         progress = st.progress(0, text="Loading activation vectors…")
         try:
             progress.progress(15, text="Loading activation vectors…")
-            samples = load_persona_vectors(
+            samples = _load_persona_vectors(
                 store,
                 variant,
-                mask_strategy=mask_strategy,
-                persona_ids=persona_ids,
+                mask_strategy,
+                persona_ids,
             )
             progress.progress(55, text=build_label)
             build_kwargs = {}
@@ -634,7 +783,7 @@ def _render_layered_figure_analysis(
                 build_kwargs["n_components"] = n_components
                 if n_clusters is not None:
                     build_kwargs["n_clusters"] = n_clusters
-            if figure_kind == "similarity" and include_pair_trajectories:
+            if figure_kind == "similarity" and pair_trajectories:
                 main_fig, extra_fig = build_similarity_figures(
                     samples,
                     layers=selected_layers,
@@ -663,16 +812,19 @@ def _render_layered_figure_analysis(
                             f"{prompt_variant_label(variant)} - persona vectors"
                         ),
                     )
-                    if include_pair_trajectories
+                    if pair_trajectories
                     else None
                 )
             progress.progress(90, text="Storing figure state…")
-            st.session_state[fig_key] = (main_fig, extra_fig, samples.vectors.shape[0])
+            n_samples = samples.vectors.shape[0]
+            del samples
+            _store_figure_state(fig_key, (main_fig, extra_fig, n_samples))
             progress.progress(100, text="Done.")
         except Exception as exc:
             st.error(f"Could not build figure: {exc}")
             st.session_state.pop(fig_key, None)
         finally:
+            _release_vector_memory(store, [variant])
             progress.empty()
 
     if fig_key in st.session_state:
@@ -734,7 +886,7 @@ def _render_dendrogram_analysis(
         mask_strategy,
         widget_scope=f"dendro:{store_id(store)}",
         remember_key=_LAST_DENDRO_PERSONAS_KEY,
-        default_all=True,
+        default_count_limit=_DEFAULT_PERSONA_LIMITS["dendro"],
     )
     if not persona_ids:
         return
@@ -755,6 +907,22 @@ def _render_dendrogram_analysis(
             key=widget_key("load", "dendro_linkage", store_id(store)),
         )
 
+    selected_layers: list[int] | None = None
+    if layered_mode:
+        source, location, model_name = store_cache_parts(store)
+        layer_options = store_layers_cached(
+            source,
+            location,
+            model_name,
+            mask_strategy.value,
+            tuple(shared_variants),
+            tuple(persona_ids),
+        )
+        if not layer_options:
+            st.info("No shared layers are available for the selected personas.")
+            return
+        selected_layers = _render_layer_frame_controls(store, "dendro", layer_options)
+
     persona_key = personas_fingerprint(persona_ids)
     fig_key = widget_key(
         "load",
@@ -767,7 +935,9 @@ def _render_dendrogram_analysis(
         persona_key,
         str(layered_mode),
         linkage,
+        "_".join(map(str, selected_layers or [])),
     )
+    _clear_old_figure_states(fig_key)
 
     if st.button(
         "Generate dendrograms",
@@ -779,50 +949,52 @@ def _render_dendrogram_analysis(
         progress = st.progress(0, text="Loading first variant vectors…")
         try:
             progress.progress(15, text="Loading first variant vectors…")
-            samples_a = load_persona_vectors(
+            samples_a = _load_persona_vectors(
                 store,
                 variant_a,
-                mask_strategy=mask_strategy,
-                persona_ids=persona_ids,
+                mask_strategy,
+                persona_ids,
             )
             progress.progress(40, text="Building first dendrogram…")
             fig_a = plot_persona_dendrogram(
                 samples_a,
                 layered=layered_mode,
+                layers=selected_layers,
                 linkage=linkage,
                 title=f"Dendrogram — {prompt_variant_label(variant_a)}",
             )
             fig_a.update_layout(height=750)
+            del samples_a
             fig_b = None
             if variant_a != variant_b:
                 progress.progress(60, text="Loading second variant vectors…")
-                samples_b = load_persona_vectors(
+                samples_b = _load_persona_vectors(
                     store,
                     variant_b,
-                    mask_strategy=mask_strategy,
-                    persona_ids=persona_ids,
+                    mask_strategy,
+                    persona_ids,
                 )
                 progress.progress(75, text="Building second dendrogram…")
                 fig_b = plot_persona_dendrogram(
                     samples_b,
                     layered=layered_mode,
+                    layers=selected_layers,
                     linkage=linkage,
                     title=f"Dendrogram — {prompt_variant_label(variant_b)}",
                 )
                 fig_b.update_layout(height=750)
+                del samples_b
             progress.progress(90, text="Storing figure state…")
-            st.session_state[fig_key] = (
-                fig_a,
-                fig_b,
-                len(persona_ids),
-                variant_a,
-                variant_b,
+            _store_figure_state(
+                fig_key,
+                (fig_a, fig_b, len(persona_ids), variant_a, variant_b),
             )
             progress.progress(100, text="Done.")
         except Exception as exc:
             st.error(f"Could not build dendrogram: {exc}")
             st.session_state.pop(fig_key, None)
         finally:
+            _release_vector_memory(store, shared_variants)
             progress.empty()
 
     if fig_key in st.session_state:
@@ -1033,6 +1205,8 @@ def render_compare_tab() -> None:
                 f"Centered similarity - {prompt_variant_label(v)} - persona vectors"
             ),
             include_pair_trajectories=True,
+            remember_key=_LAST_SIMILARITY_PERSONAS_KEY,
+            default_count_limit=_DEFAULT_PERSONA_LIMITS["similarity"],
         )
         return
 
@@ -1059,4 +1233,5 @@ def render_compare_tab() -> None:
             f"{analysis_mode}{dim_suffix} - {prompt_variant_label(v)} - persona vectors"
         ),
         n_components=n_components,
+        default_count_limit=_DEFAULT_PERSONA_LIMITS[analysis_mode.lower()],
     )
