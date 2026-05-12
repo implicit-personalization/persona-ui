@@ -3,8 +3,6 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from persona_data.environment import get_artifacts_dir
-
 from utils.helpers import slugify
 
 
@@ -47,6 +45,8 @@ def save_chat_export(
     Returns:
         The path the export was written to.
     """
+
+    from persona_data.environment import get_artifacts_dir
 
     payload = {
         "model_name": model_name,

@@ -1,11 +1,12 @@
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import streamlit as st
 from persona_data.synth_persona import PersonaData
 
-from utils.contrast import TokenContrast, render_contrast_html
 from utils.helpers import (
     CHAT_PROMPT_MODE_LABEL_TO_KEY,
     CHAT_PROMPT_MODE_LABELS,
@@ -13,6 +14,9 @@ from utils.helpers import (
     persona_label,
     widget_key,
 )
+
+if TYPE_CHECKING:
+    from utils.contrast import TokenContrast
 
 GENERATION_DEFAULTS = {
     "max_new_tokens": 256,
@@ -326,6 +330,8 @@ def render_chat_message(
     contrast: TokenContrast | None = message.get("_contrast") if show_contrast else None
     with st.chat_message(message["role"]):
         if contrast is not None:
+            from utils.contrast import render_contrast_html
+
             st.html(render_contrast_html(contrast))
         else:
             st.markdown(message["content"])

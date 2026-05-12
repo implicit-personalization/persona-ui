@@ -103,6 +103,9 @@ def cached_model(model_name: str):
     model objects when toggling NDIF.
     """
 
+    import torch
     from nnterp import StandardizedTransformer
+
+    torch.set_grad_enabled(False)
 
     return StandardizedTransformer(model_name)

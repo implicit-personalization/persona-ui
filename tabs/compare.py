@@ -72,6 +72,17 @@ _DEFAULT_PERSONA_LIMITS = {
 }
 _MAX_SIMILARITY_CELLS = 4_000_000
 _MAX_PAIR_TRAJECTORY_TRACES = 500
+_CLUSTER_METHODS = {
+    "K-means": "kmeans",
+    "Agglomerative": "agglomerative",
+    "HDBSCAN": "hdbscan",
+}
+_CLUSTER_MODES = {
+    "Mean across layers": "mean_across_layers",
+    "First selected layer": "first_layer",
+    "Per layer": "per_layer",
+}
+_CLUSTER_LINKAGES = ["ward", "complete", "average", "single"]
 
 
 def _is_assistant_persona(persona_id: str, persona_name: str | None = None) -> bool:
@@ -728,21 +739,65 @@ def _render_layered_figure_analysis(
             return
 
     n_clusters = None
+    cluster_mode = None
+    cluster_method = None
+    cluster_linkage = None
+    min_cluster_size = None
     if figure_kind in {"pca", "umap"}:
-        use_kmeans = st.toggle(
-            "Color by K-means clusters",
+        use_clusters = st.toggle(
+            "Color by clusters",
             value=False,
-            key=widget_key("load", "kmeans_enabled", scope, store_id(store)),
-            help="Run K-means on persona vectors and color each persona by cluster.",
+            key=widget_key("load", "clusters_enabled", scope, store_id(store)),
+            help="Cluster persona vectors and color points by cluster.",
         )
-        if use_kmeans:
-            n_clusters = st.slider(
-                "K (clusters)",
-                min_value=2,
-                max_value=min(10, len(persona_ids)),
-                value=min(3, len(persona_ids)),
-                key=widget_key("load", "kmeans_k", scope, store_id(store)),
+        if use_clusters:
+            method_label = st.selectbox(
+                "Cluster algorithm",
+                options=list(_CLUSTER_METHODS),
+                index=0,
+                key=widget_key("load", "cluster_method", scope, store_id(store)),
             )
+            cluster_method = _CLUSTER_METHODS[method_label]
+            if cluster_method in {"kmeans", "agglomerative"}:
+                n_clusters = st.slider(
+                    "K (clusters)",
+                    min_value=2,
+                    max_value=min(10, len(persona_ids)),
+                    value=min(3, len(persona_ids)),
+                    key=widget_key("load", "cluster_k", scope, store_id(store)),
+                )
+            if cluster_method == "agglomerative":
+                cluster_linkage = st.selectbox(
+                    "Linkage",
+                    options=_CLUSTER_LINKAGES,
+                    index=0,
+                    key=widget_key("load", "cluster_linkage", scope, store_id(store)),
+                )
+            if cluster_method == "hdbscan":
+                min_cluster_size = st.slider(
+                    "Minimum cluster size",
+                    min_value=2,
+                    max_value=len(persona_ids),
+                    value=min(5, len(persona_ids)),
+                    key=widget_key(
+                        "load",
+                        "cluster_min_cluster_size",
+                        scope,
+                        store_id(store),
+                    ),
+                )
+            mode_label = st.selectbox(
+                "Cluster fit",
+                options=list(_CLUSTER_MODES),
+                index=0,
+                key=widget_key("load", "cluster_mode", scope, store_id(store)),
+                help=(
+                    "Mean across layers is the previous behavior. First selected "
+                    "layer keeps one fixed clustering from the first frame. Per layer "
+                    "recomputes clustering for each animation frame."
+                ),
+            )
+            cluster_mode = _CLUSTER_MODES[mode_label]
 
     fig_key = widget_key(
         "load",
@@ -753,6 +808,10 @@ def _render_layered_figure_analysis(
         figure_kind,
         str(n_components),
         str(n_clusters),
+        str(cluster_mode),
+        str(cluster_method),
+        str(cluster_linkage),
+        str(min_cluster_size),
         variant,
         "persona_vector",
         persona_key,
@@ -781,8 +840,14 @@ def _render_layered_figure_analysis(
             build_kwargs = {}
             if figure_kind in {"umap", "pca"}:
                 build_kwargs["n_components"] = n_components
-                if n_clusters is not None:
+                if cluster_method is not None:
+                    build_kwargs["cluster_method"] = cluster_method
                     build_kwargs["n_clusters"] = n_clusters
+                    build_kwargs["cluster_mode"] = cluster_mode
+                    if cluster_linkage is not None:
+                        build_kwargs["cluster_linkage"] = cluster_linkage
+                    if min_cluster_size is not None:
+                        build_kwargs["min_cluster_size"] = min_cluster_size
             if figure_kind == "similarity" and pair_trajectories:
                 main_fig, extra_fig = build_similarity_figures(
                     samples,

@@ -9,8 +9,6 @@ from tabs.chat_ui import (
     render_persona_prompt_controls,
     render_system_prompt,
 )
-from tabs.compare_chat import render_compare_mode
-from tabs.probe_ui import render_probe_inspector
 from utils.chat import (
     ChatReply,
     build_chat_messages,
@@ -155,6 +153,8 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         last_token_contrast_key=_LAST_TOKEN_CONTRAST_KEY,
     )
     if tools.compare_mode:
+        from tabs.compare_chat import render_compare_mode
+
         render_compare_mode(
             remote,
             model_name,
@@ -225,14 +225,17 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
             ),
         )
 
-    render_probe_inspector(
-        context_key=context_key,
-        model_name=model_name,
-        remote=remote,
-        active_system_prompt=active_system_prompt,
-        chat_state=chat_state,
-        enabled=tools.probe_enabled,
-    )
+    if tools.probe_enabled:
+        from tabs.probe_ui import render_probe_inspector
+
+        render_probe_inspector(
+            context_key=context_key,
+            model_name=model_name,
+            remote=remote,
+            active_system_prompt=active_system_prompt,
+            chat_state=chat_state,
+            enabled=True,
+        )
 
     render_chat_window(
         chat_log=chat_log,

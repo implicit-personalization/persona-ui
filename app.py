@@ -157,12 +157,6 @@ def main() -> None:
 
     install_catppuccin_theme(st.get_option("theme.base"))
 
-    # Deferred: importing torch is slow; keep it after dotenv load (done at
-    # module level above) so the Streamlit page config renders immediately.
-    import torch
-
-    torch.set_grad_enabled(False)
-
     sidebar = _sidebar_controls()
 
     if sidebar.active_tab == "Extract":

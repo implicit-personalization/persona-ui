@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 import logging
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-import torch
-from nnterp import StandardizedTransformer
 from persona_data.prompts import format_messages, format_prompt, normalize_messages
 from persona_data.synth_persona import PersonaData
+
+if TYPE_CHECKING:
+    import torch
+    from nnterp import StandardizedTransformer
 
 logger = logging.getLogger(__name__)
 SystemPromptMode = Literal["empty", "templated", "biography", "custom"]
@@ -129,6 +133,8 @@ def format_generation_prompt(
 
 def resolve_saved_tensor(value: object) -> torch.Tensor:
     """Resolve an nnsight ``.save()`` proxy (or raw tensor) to a CPU tensor."""
+    import torch
+
     resolved = value.value if getattr(value, "value", None) is not None else value
     if not isinstance(resolved, torch.Tensor):
         raise TypeError(f"Trace result did not resolve to a tensor: {type(resolved)!r}")
@@ -153,6 +159,8 @@ def _seeded_rng(seed: int | None):
     if seed is None:
         yield
         return
+
+    import torch
 
     cuda_ctx = torch.random.fork_rng(devices=range(torch.cuda.device_count()))
     mps_ctx = (
@@ -198,6 +206,8 @@ def generate_chat_reply(
     Returns:
         ChatReply with generated text and token ids.
     """
+
+    import torch
 
     tokenizer = model.tokenizer
     prompt, prompt_token_count = format_generation_prompt(messages, tokenizer)
