@@ -197,7 +197,7 @@ def _trace_requested(context_key: str) -> bool:
     if st.button(
         "Trace conversation",
         key=widget_key(context_key, "probe_trace"),
-        use_container_width=True,
+        width="stretch",
     ):
         st.session_state[trace_key] = True
     return bool(st.session_state.get(trace_key, False))

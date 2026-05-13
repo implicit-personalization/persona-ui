@@ -29,17 +29,19 @@ GENERATION_DEFAULTS = {
 _LAST_GEN_PREFIX = "chat:last_gen:"
 
 
-def _persisted_key(context_key: str, name: str, default) -> str:
+def _last_generation_key(name: str) -> str:
+    return f"{_LAST_GEN_PREFIX}{name}"
+
+
+def _persisted_key(context_key: str, name: str, default: object) -> str:
     """Per-context widget key, seeded from the last cross-context value."""
-    last_key = f"{_LAST_GEN_PREFIX}{name}"
     key = widget_key(context_key, name)
     if key not in st.session_state:
-        st.session_state[key] = st.session_state.get(last_key, default)
+        st.session_state[key] = st.session_state.get(
+            _last_generation_key(name),
+            default,
+        )
     return key
-
-
-def _remember(name: str, value) -> None:
-    st.session_state[f"{_LAST_GEN_PREFIX}{name}"] = value
 
 
 @dataclass(frozen=True)
@@ -100,7 +102,7 @@ def _open_edit_dialog(
 
     save_col, cancel_col = st.columns(2)
     with save_col:
-        if st.button("Save", type="primary", use_container_width=True):
+        if st.button("Save", type="primary", width="stretch"):
             messages[msg_index]["content"] = new_content
             messages[msg_index].pop("_contrast", None)
             if role == "assistant":
@@ -110,7 +112,7 @@ def _open_edit_dialog(
                 st.session_state[pending_key] = "regenerate_after_edit"
             st.rerun()
     with cancel_col:
-        if st.button("Cancel", use_container_width=True):
+        if st.button("Cancel", width="stretch"):
             st.rerun()
 
 
@@ -129,13 +131,13 @@ def _open_system_prompt_dialog(
     )
     save_col, cancel_col = st.columns(2)
     with save_col:
-        if st.button("Save", type="primary", use_container_width=True):
+        if st.button("Save", type="primary", width="stretch"):
             st.session_state[prompt_key] = new_value
             if on_save is not None:
                 on_save()
             st.rerun()
     with cancel_col:
-        if st.button("Cancel", use_container_width=True):
+        if st.button("Cancel", width="stretch"):
             st.rerun()
 
 
@@ -307,7 +309,9 @@ def _render_generation_fragment(context_key: str, remote: bool) -> GenerationCon
         ("top_k", top_k),
         ("seed_enabled", seed_enabled),
     ):
-        _remember(name, value)
+        st.session_state[_last_generation_key(name)] = value
+    if seed is not None:
+        st.session_state[_last_generation_key("seed")] = seed
 
     do_sample = bool(use_sampling)
     return GenerationConfig(

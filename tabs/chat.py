@@ -1,50 +1,39 @@
+from __future__ import annotations
+
+from typing import cast
+
 import streamlit as st
 from persona_data.synth_persona import PersonaData
 
-from state import ChatState, chat_session_key, get_chat_state, reset_chat_context_state
+from state import (
+    ChatState,
+    PendingChatAction,
+    chat_session_key,
+    get_chat_state,
+    reset_chat_context_state,
+)
+from tabs.chat_shared import (
+    generate_chat_reply_result,
+    hydrate_chat_state,
+    load_chat_personas,
+    render_chat_selection,
+)
 from tabs.chat_ui import (
     GenerationConfig,
     render_advanced_settings,
     render_chat_window,
-    render_persona_prompt_controls,
     render_system_prompt,
 )
-from utils.chat import (
-    ChatReply,
-    build_chat_messages,
-    generate_chat_reply,
-    resolve_system_prompt,
-)
+from utils.chat import build_chat_messages, resolve_system_prompt
 from utils.chat_export import save_chat_export
-from utils.datasets import load_persona_list
-from utils.helpers import widget_key
+from utils.helpers import session_key, widget_key
 from utils.runtime import cached_model
 
-_LAST_PERSONA_ID_KEY = "chat:last_persona_id"
-_LAST_PROMPT_MODE_KEY = "chat:last_prompt_mode"
-_LAST_COMPARE_MODE_KEY = "chat:last_compare_mode"
-_LAST_PROBE_ENABLED_KEY = "chat:last_probe_enabled"
-_LAST_TOKEN_CONTRAST_KEY = "chat:last_token_contrast"
-
-
-def _load_personas(dataset_source: str) -> list[PersonaData] | None:
-    try:
-        personas, dataset_status = load_persona_list(
-            dataset_source,
-            personas_file=st.session_state.get("extract__personas_file"),
-            qa_file=st.session_state.get("extract__qa_file"),
-        )
-        st.caption(dataset_status)
-    except Exception as exc:
-        st.error(f"Could not load data: {exc}")
-        st.info("Check the selected dataset source or upload both JSONL files.")
-        return None
-
-    if not personas:
-        st.warning("No personas found in the selected dataset.")
-        st.info("Try a different dataset source or upload a non-empty personas file.")
-        return None
-    return personas
+_LAST_PERSONA_ID_KEY = session_key("chat", "last_persona_id")
+_LAST_PROMPT_MODE_KEY = session_key("chat", "last_prompt_mode")
+_LAST_COMPARE_MODE_KEY = session_key("chat", "last_compare_mode")
+_LAST_PROBE_ENABLED_KEY = session_key("chat", "last_probe_enabled")
+_LAST_TOKEN_CONTRAST_KEY = session_key("chat", "last_token_contrast")
 
 
 def _render_single_chat_footer(
@@ -99,26 +88,31 @@ def _handle_single_chat_generation(
     chat_state: ChatState,
     active_system_prompt: str | None,
     generation: GenerationConfig,
-    pending_action: object,
+    pending_action: PendingChatAction,
     chat_log,
 ) -> None:
     messages = build_chat_messages(active_system_prompt, chat_state["messages"])
 
     with st.spinner("Generating reply..."):
         model = cached_model(model_name=model_name)
-        try:
-            reply: ChatReply = generate_chat_reply(
-                model=model,
-                messages=messages,
-                remote=remote,
-                **generation.to_generate_kwargs(),
-            )
-        except Exception as exc:
+
+        def _show_error(exc: Exception) -> None:
             with chat_log:
                 st.error(f"Could not generate a reply: {exc}")
                 st.info("Try a shorter prompt, reset the chat, or switch personas.")
+
+        reply, error = generate_chat_reply_result(
+            model=model,
+            messages=messages,
+            remote=remote,
+            generation=generation,
+            on_error=_show_error,
+        )
+        if error is not None:
             if pending_action == "new_user_prompt" and chat_state["messages"]:
                 chat_state["messages"].pop()
+            return
+        if reply is None:
             return
 
     chat_state["messages"].append({"role": "assistant", "content": reply.text})
@@ -132,16 +126,14 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     st.caption("Chat with a persona, optionally side-by-side or with token contrast.")
 
     context_key = chat_session_key(model_name, dataset_source)
-    chat_state = get_chat_state(model_name, remote, dataset_source)
+    chat_state = get_chat_state(model_name, dataset_source)
+    hydrate_chat_state(
+        chat_state,
+        persisted_persona_key=_LAST_PERSONA_ID_KEY,
+        persisted_prompt_key=_LAST_PROMPT_MODE_KEY,
+    )
 
-    # Carry over persona / prompt selections across model or remote switches.
-    if chat_state["persona_id"] is None:
-        chat_state["persona_id"] = st.session_state.get(_LAST_PERSONA_ID_KEY)
-        chat_state["prompt_mode"] = st.session_state.get(
-            _LAST_PROMPT_MODE_KEY, "templated"
-        )
-
-    personas = _load_personas(dataset_source)
+    personas = load_chat_personas(dataset_source)
     if personas is None:
         return
 
@@ -166,7 +158,6 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         )
         return
 
-    # ── Single-chat mode ──────────────────────────────────────────────────────
     persona_select_key = widget_key(context_key, "persona_select")
     prompt_mode_select_key = widget_key(context_key, "system_prompt_select")
     prompt_key = widget_key(context_key, "custom_system_prompt")
@@ -175,6 +166,20 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     export_key = widget_key(context_key, "export_chat")
     reset_key = widget_key(context_key, "reset")
     edit_key = widget_key(context_key, "edit_idx")
+
+    selection = render_chat_selection(
+        personas,
+        chat_state["persona_id"],
+        chat_state["prompt_mode"],
+        persona_select_key,
+        prompt_mode_select_key,
+        persisted_persona_key=_LAST_PERSONA_ID_KEY,
+        persisted_prompt_key=_LAST_PROMPT_MODE_KEY,
+        column_widths=(2, 1),
+    )
+    selected_persona = selection.persona
+    prompt_mode = selection.prompt_mode
+    changed_context = selection.changed
 
     def _reset_active_chat_context() -> None:
         reset_chat_context_state(
@@ -186,17 +191,6 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
             pending_key,
         )
         st.session_state.pop(edit_key, None)
-
-    selected_persona, prompt_mode, changed_context = render_persona_prompt_controls(
-        personas,
-        chat_state["persona_id"],
-        chat_state["prompt_mode"],
-        persona_select_key,
-        prompt_mode_select_key,
-        column_widths=(2, 1),
-    )
-    st.session_state[_LAST_PERSONA_ID_KEY] = selected_persona.id
-    st.session_state[_LAST_PROMPT_MODE_KEY] = prompt_mode
 
     active_system_prompt = resolve_system_prompt(
         persona=selected_persona,
@@ -259,14 +253,15 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
 
     user_prompt = st.chat_input("Ask something...", key=chat_input_key)
 
-    # Pass 1: user submitted — append message and rerun so it renders before generation.
     if user_prompt:
         chat_state["messages"].append({"role": "user", "content": user_prompt})
         st.session_state[pending_key] = "new_user_prompt"
         st.rerun()
 
-    # Pass 2: message is already rendered above; now run generation.
-    pending_action = st.session_state.pop(pending_key, None)
+    pending_action = cast(
+        PendingChatAction | None,
+        st.session_state.pop(pending_key, None),
+    )
     if not pending_action:
         return
 

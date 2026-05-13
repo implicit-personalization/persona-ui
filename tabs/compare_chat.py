@@ -6,22 +6,21 @@ from nnterp import StandardizedTransformer
 from persona_data.synth_persona import PersonaData
 
 from state import ChatState, default_chat_state, reset_chat_context_state
-from utils.chat import (
-    ChatReply,
-    build_chat_messages,
-    generate_chat_reply,
-    resolve_system_prompt,
+from tabs.chat_shared import (
+    generate_chat_reply_result,
+    hydrate_chat_state,
+    render_chat_selection,
 )
+from utils.chat import ChatReply, build_chat_messages, resolve_system_prompt
 from utils.chat_export import save_chat_export
 from utils.contrast import compute_contrast, compute_contrast_pair
-from utils.helpers import persona_label, widget_key
+from utils.helpers import persona_label, session_key, widget_key
 from utils.runtime import cached_model
 
 from .chat_ui import (
     GenerationConfig,
     render_chat_message,
     render_chat_window,
-    render_persona_prompt_controls,
     render_system_prompt,
 )
 
@@ -68,21 +67,26 @@ def _render_compare_panel(
     edit_key = widget_key(panel_key, "edit_idx")
     pending_key = widget_key(panel_key, "pending_regen")
 
-    persist_persona_key = f"chat:last_cmp_{side}_persona"
-    persist_prompt_key = f"chat:last_cmp_{side}_prompt"
-    if state["persona_id"] is None:
-        state["persona_id"] = st.session_state.get(persist_persona_key)
-        state["prompt_mode"] = st.session_state.get(persist_prompt_key, "templated")
+    persist_persona_key = session_key("chat", f"last_cmp_{side}_persona")
+    persist_prompt_key = session_key("chat", f"last_cmp_{side}_prompt")
+    hydrate_chat_state(
+        state,
+        persisted_persona_key=persist_persona_key,
+        persisted_prompt_key=persist_prompt_key,
+    )
 
-    selected_persona, prompt_mode, changed = render_persona_prompt_controls(
+    selection = render_chat_selection(
         personas,
         state["persona_id"],
         state["prompt_mode"],
         widget_key(panel_key, "persona"),
         widget_key(panel_key, "prompt_mode"),
+        persisted_persona_key=persist_persona_key,
+        persisted_prompt_key=persist_prompt_key,
     )
-    st.session_state[persist_persona_key] = selected_persona.id
-    st.session_state[persist_prompt_key] = prompt_mode
+    selected_persona = selection.persona
+    prompt_mode = selection.prompt_mode
+    changed = selection.changed
 
     if changed:
         reset_chat_context_state(
@@ -136,19 +140,13 @@ def _generate_panels(
     results: list[ChatReply | Exception] = []
     with st.spinner(spinner_label):
         for panel in panels:
-            try:
-                results.append(
-                    generate_chat_reply(
-                        model=model,
-                        messages=build_chat_messages(
-                            panel.prompt, panel.state["messages"]
-                        ),
-                        remote=remote,
-                        **generation.to_generate_kwargs(),
-                    )
-                )
-            except Exception as exc:
-                results.append(exc)
+            reply, error = generate_chat_reply_result(
+                model=model,
+                messages=build_chat_messages(panel.prompt, panel.state["messages"]),
+                remote=remote,
+                generation=generation,
+            )
+            results.append(reply if error is None else error)
     return results
 
 

@@ -5,7 +5,7 @@ import streamlit as st
 from catppuccin import PALETTE
 from persona_data.prompts import format_prompt
 from persona_data.synth_persona import BASELINE_PERSONA_ID, PersonaData, QAPair
-from persona_vectors.artifacts import PERSONA_VARIANTS
+from persona_vectors.artifacts import SUPPORTED_VARIANTS
 from persona_vectors.extraction import (
     MaskStrategy,
     prepare_inputs_for_strategy,
@@ -14,11 +14,12 @@ from persona_vectors.extraction import (
 from persona_vectors.preview import TokenSegment, preview_token_segments
 
 from utils.controls import render_mask_strategy_select
-from utils.datasets import load_dataset, load_persona_list
+from utils.datasets import load_dataset, load_persona_list_from_dataset
 from utils.helpers import (
     NDIF_STATUS_ICONS,
     persona_label,
     prompt_variant_label,
+    session_key,
     widget_key,
 )
 from utils.runtime import cached_model
@@ -28,6 +29,9 @@ _LAST_BASELINE_KEY = "extract:last_include_baseline"
 _LAST_PERSONA_IDS_KEY = "extract:last_persona_ids"
 _LAST_MAX_QUESTIONS_KEY = "extract:last_max_questions"
 _LAST_MASK_STRATEGY_KEY = "extract:last_mask_strategy"
+
+_PERSONAS_FILE_KEY = session_key("extract", "personas_file")
+_QA_FILE_KEY = session_key("extract", "qa_file")
 
 _DEFAULT_MAX_QUESTIONS = 50
 
@@ -42,7 +46,7 @@ def _build_run_plan(
     selected_variants: list[str],
     runs: list[tuple[PersonaData, list[QAPair]]],
 ) -> list[tuple[PersonaData, list[QAPair], str]]:
-    """Cartesian product of personas × variants."""
+    """Cartesian product of personas x variants."""
     return [(p, qa, v) for v in selected_variants for p, qa in runs]
 
 
@@ -63,13 +67,13 @@ def _render_local_dataset_upload(dataset_source: str) -> None:
         st.file_uploader(
             "personas.jsonl",
             type=["jsonl"],
-            key="extract__personas_file",
+            key=_PERSONAS_FILE_KEY,
             help="Expected fields: id, persona, templated_view, biography_view",
         )
         st.file_uploader(
             "qa.jsonl",
             type=["jsonl"],
-            key="extract__qa_file",
+            key=_QA_FILE_KEY,
             help="Expected fields: id, qid, type, item_type, scope, question, answer",
         )
 
@@ -80,12 +84,14 @@ def _render_variant_controls(
     remote: bool,
     dataset_source: str,
 ) -> tuple[list[str], bool] | None:
-    default_variants = st.session_state.get(_LAST_VARIANTS_KEY, list(PERSONA_VARIANTS))
+    default_variants = st.session_state.get(
+        _LAST_VARIANTS_KEY, list(SUPPORTED_VARIANTS)
+    )
     selected_variants = st.multiselect(
         "Persona variants",
-        options=PERSONA_VARIANTS,
-        default=[v for v in default_variants if v in PERSONA_VARIANTS]
-        or list(PERSONA_VARIANTS),
+        options=SUPPORTED_VARIANTS,
+        default=[v for v in default_variants if v in SUPPORTED_VARIANTS]
+        or list(SUPPORTED_VARIANTS),
         format_func=prompt_variant_label,
         key=_extract_widget_key(model_name, remote, dataset_source, "persona_variants"),
         help="Extract these variants for each selected persona.",
@@ -110,14 +116,10 @@ def _load_qa_dataset_personas(
     try:
         dataset, dataset_status = load_dataset(
             dataset_source,
-            personas_file=st.session_state.get("extract__personas_file"),
-            qa_file=st.session_state.get("extract__qa_file"),
+            personas_file=st.session_state.get(_PERSONAS_FILE_KEY),
+            qa_file=st.session_state.get(_QA_FILE_KEY),
         )
-        personas, _ = load_persona_list(
-            dataset_source,
-            personas_file=st.session_state.get("extract__personas_file"),
-            qa_file=st.session_state.get("extract__qa_file"),
-        )
+        personas = load_persona_list_from_dataset(dataset)
         st.caption(dataset_status)
     except Exception as exc:
         st.error(f"Could not load data: {exc}")
@@ -289,10 +291,10 @@ def _render_extract_actions() -> tuple[bool, bool]:
         run_clicked = st.button(
             "Run extraction",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
     with preview_col:
-        preview_clicked = st.button("Preview tokens", use_container_width=True)
+        preview_clicked = st.button("Preview tokens", width="stretch")
     return run_clicked, preview_clicked
 
 

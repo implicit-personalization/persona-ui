@@ -20,7 +20,7 @@ Streamlit interface for persona vector extraction, analysis, and chat.
 A web app built on top of [persona-vectors](../persona-vectors) that provides three tabs:
 
 - **Chat** — interactive conversations with a model using persona-based system prompts (templated or biography)
-- **Compare** — load local or Hub persona vectors and explore cosine similarity, PCA, UMAP, and similarity views
+- **Compare** — load local or Hub persona vectors and explore cosine similarity, PCA, UMAP, attribute-colored projections, and dendrograms
 - **Extract** — run activation extraction from HuggingFace persona datasets or a local JSONL dataset directly from the browser
 
 ## Repository Layout
@@ -31,7 +31,7 @@ persona-ui/
 ├── state.py                 # Session state management (chat history, KV cache)
 ├── tabs/
 │   ├── chat.py              # Chat tab
-│   ├── compare.py           # Activation comparison tab
+│   ├── analysis.py          # Analysis tab (cosine similarity, PCA, UMAP, Isomap, dendrogram)
 │   ├── compare_chat.py      # Side-by-side chat comparison mode
 │   ├── extract.py           # Extraction tab
 │   └── probe_ui.py          # Probe upload and tracing controls

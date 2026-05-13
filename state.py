@@ -2,7 +2,8 @@ from typing import Literal, NotRequired, TypedDict
 
 import streamlit as st
 
-_CHAT_STATE_PREFIX = "chat_state::"
+from utils.helpers import session_key
+
 PendingChatAction = Literal["new_user_prompt", "regenerate_after_edit"]
 
 
@@ -22,7 +23,7 @@ class ChatState(TypedDict):
 def chat_session_key(model_name: str, dataset_source: str) -> str:
     """Build the session-state key for a chat context."""
 
-    return f"{_CHAT_STATE_PREFIX}{model_name}::{dataset_source}"
+    return session_key("chat_state", model_name, dataset_source)
 
 
 def default_chat_state() -> ChatState:
@@ -48,9 +49,8 @@ def reset_chat_context_state(
         st.session_state.pop(key, None)
 
 
-def get_chat_state(model_name: str, _remote: bool, dataset_source: str) -> ChatState:
+def get_chat_state(model_name: str, dataset_source: str) -> ChatState:
     """Return the mutable chat state for the active context."""
 
     key = chat_session_key(model_name, dataset_source)
-    state = st.session_state.setdefault(key, default_chat_state())
-    return state
+    return st.session_state.setdefault(key, default_chat_state())

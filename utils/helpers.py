@@ -1,8 +1,20 @@
 import hashlib
 import re
 from collections.abc import Iterable
+from enum import Enum
 
 from persona_data.synth_persona import PersonaData
+
+
+class DatasetSource(str, Enum):
+    SYNTH_PERSONA = "HuggingFace: synth-persona"
+    NEMOTRON_FRANCE = "HuggingFace: nemotron-france"
+    NEMOTRON_USA = "HuggingFace: nemotron-usa"
+    LOCAL_UPLOAD = "Local JSONL upload"
+
+
+DATASET_SOURCES = [s.value for s in DatasetSource]
+
 
 # Variant key -> human-readable label mapping
 VARIANT_LABELS = {
@@ -16,21 +28,21 @@ VARIANT_LABELS = {
 CHAT_PROMPT_MODES = ("empty", "templated", "biography", "custom")
 CHAT_PROMPT_MODE_LABELS = [VARIANT_LABELS[key] for key in CHAT_PROMPT_MODES]
 CHAT_PROMPT_MODE_LABEL_TO_KEY = {VARIANT_LABELS[key]: key for key in CHAT_PROMPT_MODES}
-
-
-DATASET_SOURCES = [
-    "HuggingFace: synth-persona",
-    "HuggingFace: nemotron-france",
-    "HuggingFace: nemotron-usa",
-    "Local JSONL upload",
+ANALYSIS_MODES = [
+    "Cosine similarity",
+    "Similarity matrix",
+    "PCA",
+    "UMAP",
+    "Isomap",
+    "Dendrogram",
 ]
-ANALYSIS_MODES = ["Cosine similarity", "Similarity matrix", "PCA", "UMAP", "Dendrogram"]
 
 ANALYSIS_HELP_TEXT = {
     "Cosine similarity": "Compare layer-wise alignment between variants.",
     "Similarity matrix": "Compare centered pairwise similarity between persona vectors by layer, with pair trajectories across layers.",
     "PCA": "Project per-persona vectors into a 2D or 3D global view.",
     "UMAP": "Project per-persona vectors into a 2D or 3D local-neighborhood view.",
+    "Isomap": "Project per-persona vectors with graph-geodesic distances to probe manifold-like geometry.",
     "Dendrogram": "Hierarchical clustering of persona vectors — shows biography and templated side by side for direct comparison.",
 }
 
@@ -56,6 +68,12 @@ def widget_key(*parts: str) -> str:
     return "::".join(parts)
 
 
+def session_key(*parts: str) -> str:
+    """Generate a colon-separated Streamlit session-state key from parts."""
+
+    return ":".join(parts)
+
+
 def personas_fingerprint(persona_ids: Iterable[str]) -> str:
     """Stable short fingerprint for a set of persona ids.
 
@@ -78,11 +96,3 @@ def persona_label(persona: PersonaData) -> str:
     """Format a persona for selection widgets."""
 
     return f"{persona.name} ({persona.id})"
-
-
-def persona_display_label(persona_id: str, persona_name: str | None) -> str:
-    """Format a persona id with an optional display name."""
-
-    if persona_name:
-        return f"{persona_name} ({persona_id})"
-    return persona_id

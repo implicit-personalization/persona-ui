@@ -13,7 +13,7 @@ from persona_data.nemotron_personas import (
 from persona_data.synth_persona import PersonaDataset as LocalPersonaDataset
 from persona_data.synth_persona import SynthPersonaDataset
 
-from .helpers import DATASET_SOURCES
+from .helpers import DatasetSource
 
 
 @st.cache_resource(show_spinner=False)
@@ -63,6 +63,12 @@ def load_persona_list(
     """
 
     dataset, status = load_dataset(dataset_source, personas_file, qa_file)
+    return load_persona_list_from_dataset(dataset), status
+
+
+def load_persona_list_from_dataset(dataset: Any) -> list:
+    """Materialize and cache personas from an already-loaded dataset."""
+
     cached = getattr(dataset, "_persona_list_cache", None)
     if cached is None:
         cached = list(dataset)
@@ -70,7 +76,7 @@ def load_persona_list(
             dataset._persona_list_cache = cached
         except (AttributeError, TypeError):
             pass
-    return cached, status
+    return cached
 
 
 def load_dataset(
@@ -86,13 +92,13 @@ def load_dataset(
 ]:
     """Load the selected dataset source for the UI."""
 
-    if dataset_source == DATASET_SOURCES[0]:
+    if dataset_source == DatasetSource.SYNTH_PERSONA.value:
         return _cached_dataset(SynthPersonaDataset), "SynthPersona"
 
-    if dataset_source == DATASET_SOURCES[1]:
+    if dataset_source == DatasetSource.NEMOTRON_FRANCE.value:
         return _cached_dataset(NemotronPersonasFranceDataset), "Nemotron France"
 
-    if dataset_source == DATASET_SOURCES[2]:
+    if dataset_source == DatasetSource.NEMOTRON_USA.value:
         return _cached_dataset(NemotronPersonasUSADataset), "Nemotron USA"
 
     if personas_file is None or qa_file is None:

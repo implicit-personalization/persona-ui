@@ -244,7 +244,9 @@ def render_contrast_html(result: TokenContrast) -> str:
     it is, with a hover tooltip showing the raw Δlog P, plus a legend.
     """
     spans: list[str] = []
-    for token, weight, raw in zip(result.tokens, result.weights, result.raw_diffs):
+    for token, weight, raw in zip(
+        result.tokens, result.weights, result.raw_diffs, strict=True
+    ):
         bg = _weight_to_bg(weight)
         tip = escape(f"Δlog P(A−B): {raw:+.3f}")
         text = escape(token)

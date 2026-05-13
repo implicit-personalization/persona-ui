@@ -4,13 +4,26 @@ from dataclasses import dataclass
 import streamlit as st
 from dotenv import load_dotenv
 
-from utils.helpers import DATASET_SOURCES
+from utils.helpers import DATASET_SOURCES, session_key
+from utils.runtime import list_remote_models
+from utils.theme import install_catppuccin_theme
 
 load_dotenv()
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "google/gemma-2-2b-it")
 REMOTE_DEFAULT_MODEL = os.environ.get("REMOTE_DEFAULT_MODEL", "google/gemma-2-9b-it")
-_LAST_LOCAL_MODEL_KEY = "sidebar:last_local_model"
-_LAST_REMOTE_MODEL_KEY = "sidebar:last_remote_model"
+_LAST_LOCAL_MODEL_KEY = session_key("sidebar", "last_local_model")
+_LAST_REMOTE_MODEL_KEY = session_key("sidebar", "last_remote_model")
+_SIDEBAR_ACTIVE_TAB_KEY = session_key("sidebar", "active_tab")
+_SIDEBAR_REMOTE_MODEL_CUSTOM_VALUE_KEY = session_key(
+    "sidebar", "remote_model_custom_value"
+)
+_SIDEBAR_REMOTE_MODEL_CUSTOM_ENABLED_KEY = session_key(
+    "sidebar", "remote_model_custom_enabled"
+)
+_SIDEBAR_REMOTE_MODEL_KEY = session_key("sidebar", "remote_model")
+_SIDEBAR_LOCAL_MODEL_KEY = session_key("sidebar", "local_model")
+_SIDEBAR_REMOTE_KEY = session_key("sidebar", "remote")
+_SIDEBAR_DATASET_SOURCE_KEY = session_key("sidebar", "dataset_source")
 
 
 _TABS = ["Chat", "Analysis", "Extract"]
@@ -35,9 +48,9 @@ def _remote_model_input(remote_models: list[str]) -> str:
         model_name = st.text_input(
             "Model",
             value=st.session_state.get(
-                "sidebar__remote_model_custom_value", last_remote
+                _SIDEBAR_REMOTE_MODEL_CUSTOM_VALUE_KEY, last_remote
             ),
-            key="sidebar__remote_model_custom_value",
+            key=_SIDEBAR_REMOTE_MODEL_CUSTOM_VALUE_KEY,
             help="NDIF model id. Use this to cold-load a remote model.",
         )
         st.session_state[_LAST_REMOTE_MODEL_KEY] = model_name
@@ -46,16 +59,16 @@ def _remote_model_input(remote_models: list[str]) -> str:
     custom = st.toggle(
         "Custom remote model",
         value=False,
-        key="sidebar__remote_model_custom_enabled",
+        key=_SIDEBAR_REMOTE_MODEL_CUSTOM_ENABLED_KEY,
         help="Enter any NDIF-loadable model id, even if it is not currently running.",
     )
     if custom:
         model_name = st.text_input(
             "Model",
             value=st.session_state.get(
-                "sidebar__remote_model_custom_value", last_remote
+                _SIDEBAR_REMOTE_MODEL_CUSTOM_VALUE_KEY, last_remote
             ),
-            key="sidebar__remote_model_custom_value",
+            key=_SIDEBAR_REMOTE_MODEL_CUSTOM_VALUE_KEY,
             help="NDIF model id. Example: openai/gpt-oss-20b",
         )
         st.caption(
@@ -63,20 +76,20 @@ def _remote_model_input(remote_models: list[str]) -> str:
             "Custom model ids can cold-load if your NDIF account allows it."
         )
     else:
-        default_model = st.session_state.get("sidebar__remote_model", last_remote)
+        default_model = st.session_state.get(_SIDEBAR_REMOTE_MODEL_KEY, last_remote)
         if default_model not in remote_models:
             default_model = (
                 REMOTE_DEFAULT_MODEL
                 if REMOTE_DEFAULT_MODEL in remote_models
                 else remote_models[0]
             )
-        if st.session_state.get("sidebar__remote_model") not in remote_models:
-            st.session_state["sidebar__remote_model"] = default_model
+        if st.session_state.get(_SIDEBAR_REMOTE_MODEL_KEY) not in remote_models:
+            st.session_state[_SIDEBAR_REMOTE_MODEL_KEY] = default_model
         model_name = st.selectbox(
             "Model",
             options=remote_models,
             index=remote_models.index(default_model),
-            key="sidebar__remote_model",
+            key=_SIDEBAR_REMOTE_MODEL_KEY,
             help="Running NDIF model.",
         )
     st.session_state[_LAST_REMOTE_MODEL_KEY] = model_name
@@ -84,15 +97,13 @@ def _remote_model_input(remote_models: list[str]) -> str:
 
 
 def _sidebar_controls() -> SidebarState:
-    from utils.runtime import list_remote_models
-
     with st.sidebar:
         st.markdown("## Persona UI")
 
-        if "sidebar__active_tab" not in st.session_state:
-            st.session_state["sidebar__active_tab"] = "Chat"
+        if _SIDEBAR_ACTIVE_TAB_KEY not in st.session_state:
+            st.session_state[_SIDEBAR_ACTIVE_TAB_KEY] = "Chat"
 
-        active_tab = st.session_state["sidebar__active_tab"]
+        active_tab = st.session_state[_SIDEBAR_ACTIVE_TAB_KEY]
         for tab_name, icon in zip(_TABS, _TAB_ICONS, strict=True):
             is_selected = tab_name == active_tab
             if st.button(
@@ -102,13 +113,13 @@ def _sidebar_controls() -> SidebarState:
                 type="primary" if is_selected else "secondary",
                 icon=icon,
             ):
-                st.session_state["sidebar__active_tab"] = tab_name
+                st.session_state[_SIDEBAR_ACTIVE_TAB_KEY] = tab_name
                 st.rerun()
 
         if active_tab == "Analysis":
             model_name = st.session_state.get(_LAST_LOCAL_MODEL_KEY, DEFAULT_MODEL)
             dataset_source = st.session_state.get(
-                "sidebar__dataset_source",
+                _SIDEBAR_DATASET_SOURCE_KEY,
                 DATASET_SOURCES[0],
             )
             return SidebarState(
@@ -120,7 +131,7 @@ def _sidebar_controls() -> SidebarState:
 
         st.divider()
         st.caption("Runtime")
-        remote = st.toggle("Remote (NDIF)", value=False, key="sidebar__remote")
+        remote = st.toggle("Remote (NDIF)", value=False, key=_SIDEBAR_REMOTE_KEY)
 
         if remote:
             model_name = _remote_model_input(list_remote_models())
@@ -128,7 +139,7 @@ def _sidebar_controls() -> SidebarState:
             model_name = st.text_input(
                 "Model",
                 value=st.session_state.get(_LAST_LOCAL_MODEL_KEY, DEFAULT_MODEL),
-                key="sidebar__local_model",
+                key=_SIDEBAR_LOCAL_MODEL_KEY,
                 help="Local model id or path.",
             )
             st.session_state[_LAST_LOCAL_MODEL_KEY] = model_name
@@ -137,7 +148,7 @@ def _sidebar_controls() -> SidebarState:
         dataset_source = st.selectbox(
             "Source",
             DATASET_SOURCES,
-            key="sidebar__dataset_source",
+            key=_SIDEBAR_DATASET_SOURCE_KEY,
             help="Dataset for Chat and Extract.",
         )
 
@@ -153,8 +164,6 @@ def main() -> None:
     """Run the Streamlit app."""
 
     st.set_page_config(page_title="Persona UI", layout="wide")
-    from utils.theme import install_catppuccin_theme
-
     install_catppuccin_theme(st.get_option("theme.base"))
 
     sidebar = _sidebar_controls()
@@ -164,9 +173,9 @@ def main() -> None:
 
         render_extract_tab(sidebar.remote, sidebar.model_name, sidebar.dataset_source)
     elif sidebar.active_tab == "Analysis":
-        from tabs.compare import render_compare_tab
+        from tabs.analysis import render_analysis_tab
 
-        render_compare_tab()
+        render_analysis_tab()
     else:
         from tabs.chat import render_chat_tab
 

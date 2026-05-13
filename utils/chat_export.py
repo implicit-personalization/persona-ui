@@ -1,6 +1,6 @@
 import json
 from dataclasses import asdict, is_dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from utils.helpers import slugify
@@ -72,7 +72,7 @@ def save_chat_export(
     )
     export_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     filename_parts = [
         timestamp,
         slugify(persona_name or persona_id),

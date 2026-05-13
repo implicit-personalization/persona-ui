@@ -748,11 +748,11 @@ wheels = [
 
 [[package]]
 name = "idna"
-version = "3.14"
+version = "3.15"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/05/b1/efac073e0c297ecf2fb33c346989a529d4e19164f1759102dee5953ee17e/idna-3.14.tar.gz", hash = "sha256:466d810d7a2cc1022bea9b037c39728d51ae7dad40d480fc9b7d7ecf98ba8ee3", size = 198272, upload-time = "2026-05-10T20:32:15.935Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/77/7b3966d0b9d1d31a36ddf1746926a11dface89a83409bf1483f0237aa758/idna-3.15.tar.gz", hash = "sha256:ca962446ea538f7092a95e057da437618e886f4d349216d2b1e294abfdb65fdc", size = 199245, upload-time = "2026-05-12T22:45:57.011Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6c/3c/3f62dee257eb3d6b2c1ef2a09d36d9793c7111156a73b5654d2c2305e5ce/idna-3.14-py3-none-any.whl", hash = "sha256:e677eaf072e290f7b725f9acf0b3a2bd55f9fd6f7c70abe5f0e34823d0accf69", size = 72184, upload-time = "2026-05-10T20:32:14.295Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/23/408243171aa9aaba178d3e2559159c24c1171a641aa83b67bdd3394ead8e/idna-3.15-py3-none-any.whl", hash = "sha256:048adeaf8c2d788c40fee287673ccaa74c24ffd8dcf09ffa555a2fbb59f10ac8", size = 72340, upload-time = "2026-05-12T22:45:55.733Z" },
 ]
 
 [[package]]
@@ -1559,7 +1559,7 @@ wheels = [
 
 [[package]]
 name = "persona-data"
-version = "0.4.2"
+version = "0.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -1568,9 +1568,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "torch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a4/2f/099a74e54846172a20b697b46b285eb2f0004e1db530308d6b4ff1f19079/persona_data-0.4.2.tar.gz", hash = "sha256:7870292a79b3943a77c31595140de3b2243b783222590248d09891de70e7fe1b", size = 9276, upload-time = "2026-05-08T13:59:27.58Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/de/9f/2257b6df8c28f0844b88f64a200a4d27f82ea10a16e657ba9fd02f561135/persona_data-0.5.1.tar.gz", hash = "sha256:5ac4467c449905fecf26a743b7128f76dbd984a076426c3ce854a13394c1fc5c", size = 10336, upload-time = "2026-05-13T11:55:00.356Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/57/03/e76a48b41ee00684a4430269007e217e70f59e2597d7c862d93cfc5ac78b/persona_data-0.4.2-py3-none-any.whl", hash = "sha256:c881d6fb71af87a6fa773284076e4cb55794db6dc447a7eb0047eee2b389c855", size = 11914, upload-time = "2026-05-08T13:59:28.198Z" },
+    { url = "https://files.pythonhosted.org/packages/55/ec/328013ee81672ba800777b3a9c24f18dc7cb3a93223391e3476cac55fa1b/persona_data-0.5.1-py3-none-any.whl", hash = "sha256:ccf230b4028d08b9345910b57de6ea4b60e9ec7f65ce12203f69693988314543", size = 13078, upload-time = "2026-05-13T11:55:01.402Z" },
 ]
 
 [[package]]
@@ -1581,7 +1581,6 @@ dependencies = [
     { name = "catppuccin" },
     { name = "datasets" },
     { name = "huggingface-hub" },
-    { name = "persona-data" },
     { name = "persona-vectors" },
     { name = "plotly" },
     { name = "python-dotenv" },
@@ -1593,8 +1592,7 @@ requires-dist = [
     { name = "catppuccin", specifier = ">=2.5.0" },
     { name = "datasets", specifier = ">=4.8.5" },
     { name = "huggingface-hub", specifier = ">=1.14.0" },
-    { name = "persona-data", specifier = ">=0.4.2" },
-    { name = "persona-vectors", specifier = ">=0.7.3" },
+    { name = "persona-vectors", specifier = ">=0.8.0" },
     { name = "plotly", specifier = ">=6.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "streamlit", specifier = ">=1.44.0" },
@@ -1602,7 +1600,7 @@ requires-dist = [
 
 [[package]]
 name = "persona-vectors"
-version = "0.7.3"
+version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "datasets" },
@@ -1621,9 +1619,9 @@ dependencies = [
     { name = "transformers" },
     { name = "umap-learn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/36/25d766934dc43f60faeba8a51c698da78bdd9af2e5d191b7ce8721612dc4/persona_vectors-0.7.3.tar.gz", hash = "sha256:75a90e68142097419a2f1cf6d21878dc5202234c12ed342d63349796255baad6", size = 28641, upload-time = "2026-05-12T10:04:37.21Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/76/22/8a0ca0e6e54ebd8dd07a4064c2890ec33b68ad81a00e4e93c4f9eee2bcf7/persona_vectors-0.8.0.tar.gz", hash = "sha256:3775afc7e04ab1d02582e9c4b3f2d124174ea40d376dd2b91492457a747dd553", size = 31938, upload-time = "2026-05-13T20:00:46.357Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6b/e7/db961133fda6755e215e6cd9d4058a1cb93719d05ab6e24030c5da885d15/persona_vectors-0.7.3-py3-none-any.whl", hash = "sha256:abf07b6715321a16b218aede69f7efac7bf6a309e090db62ee376e3f09240fde", size = 33224, upload-time = "2026-05-12T10:04:36.351Z" },
+    { url = "https://files.pythonhosted.org/packages/43/a6/7f67a7df27d78db706cbc9afd5d5ca4b52970b9005717c3bfcc0ce90ec71/persona_vectors-0.8.0-py3-none-any.whl", hash = "sha256:08b37a749f98b764d22d4c943158922338ab054729f7137eff2c3a167e2b2ae5", size = 36838, upload-time = "2026-05-13T20:00:47.252Z" },
 ]
 
 [[package]]
@@ -2838,7 +2836,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "5.8.0"
+version = "5.8.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -2851,9 +2849,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f2/36/390075693b76d4fb4a2bea360fb6080347763bd1f1147c49ed0ed938778c/transformers-5.8.0.tar.gz", hash = "sha256:6cc9a1f0291d16b1c1b735bad775e78ebefff7722701d4e28f98aaaa2bd6fb91", size = 8528141, upload-time = "2026-05-05T16:50:04.778Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e7/e6/4134ea2fbea322cddc7ffc94a0d8ee47fe32ce8e876b320cd37d88edfc4d/transformers-5.8.1.tar.gz", hash = "sha256:4dd5b6de4105725104d84fd6abd74b305f4debfc251b38c648ee5dd087cf543b", size = 8532019, upload-time = "2026-05-13T03:21:57.234Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/97/7b/5621d08b34ac35deb9fa14b58d27d124d21ef125ee1c64bc724ca47dfb63/transformers-5.8.0-py3-none-any.whl", hash = "sha256:e9d2cae6d195a7e1e05164c5ebf26142a7044e4dc4267274f4809204f92827e4", size = 10630279, upload-time = "2026-05-05T16:50:01.026Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/b1/8be7e7ef0b5200491312201918b6125ef9c9df9dd0f0240ccef9ac824e6b/transformers-5.8.1-py3-none-any.whl", hash = "sha256:5340fb95962162cdfdae5cc91d7f8fedd92ed75216c1154c5e1f590fcf56dd0e", size = 10632882, upload-time = "2026-05-13T03:21:52.876Z" },
 ]
 
 [[package]]
