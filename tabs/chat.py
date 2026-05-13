@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import streamlit as st
-from persona_data.synth_persona import PersonaData
 
 from state import (
     ChatState,
@@ -28,6 +27,9 @@ from utils.chat import build_chat_messages, resolve_system_prompt
 from utils.chat_export import save_chat_export
 from utils.helpers import session_key, widget_key
 from utils.runtime import cached_model
+
+if TYPE_CHECKING:
+    from persona_data.synth_persona import PersonaData
 
 _LAST_PERSONA_ID_KEY = session_key("chat", "last_persona_id")
 _LAST_PROMPT_MODE_KEY = session_key("chat", "last_prompt_mode")

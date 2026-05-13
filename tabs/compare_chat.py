@@ -1,9 +1,9 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import streamlit as st
-from nnterp import StandardizedTransformer
-from persona_data.synth_persona import PersonaData
 
 from state import ChatState, default_chat_state, reset_chat_context_state
 from tabs.chat_shared import (
@@ -23,6 +23,10 @@ from .chat_ui import (
     render_chat_window,
     render_system_prompt,
 )
+
+if TYPE_CHECKING:
+    from nnterp import StandardizedTransformer
+    from persona_data.synth_persona import PersonaData
 
 
 @dataclass(frozen=True)

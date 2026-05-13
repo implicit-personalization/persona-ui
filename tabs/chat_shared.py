@@ -2,15 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import streamlit as st
-from persona_data.synth_persona import PersonaData
 
 from state import ChatState
 from tabs.chat_ui import GenerationConfig, render_persona_prompt_controls
 from utils.chat import ChatReply, generate_chat_reply
 from utils.datasets import load_persona_list
 from utils.helpers import session_key
+
+if TYPE_CHECKING:
+    from persona_data.synth_persona import PersonaData
 
 
 @dataclass(frozen=True)

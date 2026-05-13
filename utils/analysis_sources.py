@@ -11,6 +11,8 @@ from persona_vectors.artifacts import (
 from persona_vectors.extraction import MaskStrategy
 from persona_vectors.hub import list_hub_vector_models
 
+from utils.helpers import env_int
+
 Store = ActivationStore | HFActivationStore
 
 DEFAULT_HUB_REPO = os.environ.get(
@@ -23,7 +25,10 @@ SOURCE_LOCAL = "Local activations"
 SOURCES = (SOURCE_HUB, SOURCE_LOCAL)
 
 
-@st.cache_resource(show_spinner=False, max_entries=1)
+_STORE_CACHE_ENTRIES = env_int("PERSONA_UI_STORE_CACHE_ENTRIES", 4)
+
+
+@st.cache_resource(show_spinner=False, max_entries=_STORE_CACHE_ENTRIES)
 def activation_store_cached(
     source: str,
     location: str,

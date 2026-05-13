@@ -5,7 +5,6 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 import streamlit as st
-from persona_data.synth_persona import PersonaData
 
 from utils.helpers import (
     CHAT_PROMPT_MODE_LABEL_TO_KEY,
@@ -16,6 +15,7 @@ from utils.helpers import (
 )
 
 if TYPE_CHECKING:
+    from persona_data.synth_persona import PersonaData
     from utils.contrast import TokenContrast
 
 GENERATION_DEFAULTS = {

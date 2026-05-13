@@ -4,9 +4,12 @@ from collections.abc import Iterable
 
 import streamlit as st
 
+from utils.helpers import env_int
+
 logger = logging.getLogger(__name__)
 _LANGUAGE_MODEL_CLASSES = {"LanguageModel", "StandardizedTransformer"}
 _EXPECTED_NDIF_STATES = {"RUNNING", "NOT DEPLOYED", "DEPLOYING", "DELETING"}
+_MODEL_CACHE_ENTRIES = env_int("PERSONA_UI_MODEL_CACHE_ENTRIES", 1)
 
 
 def _iter_deployments(raw: object) -> Iterable[dict]:
@@ -91,16 +94,17 @@ def list_remote_models() -> list[str]:
     return sorted(set(model_names))
 
 
-@st.cache_resource(show_spinner=False, max_entries=1)
+@st.cache_resource(show_spinner=False, max_entries=_MODEL_CACHE_ENTRIES)
 def cached_model(model_name: str):
     """Load and cache a standardized nnterp model.
 
     Streamlit reruns this app on every interaction, so caching keeps one loaded
-    model instance per model name instead of reloading weights on every widget
-    change. ``remote`` is intentionally not part of the cache key: it matters
-    at generation/trace time, but the current ``StandardizedTransformer``
+    model instance instead of reloading weights on every widget change.
+    ``remote`` is intentionally not part of the cache key: it matters at
+    generation/trace time, but the current ``StandardizedTransformer``
     constructor ignores it, and excluding it avoids loading duplicate local
-    model objects when toggling NDIF.
+    model objects when toggling NDIF. The cache defaults to one model to avoid
+    keeping multiple large models in RAM.
     """
 
     import torch

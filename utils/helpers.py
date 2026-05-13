@@ -1,9 +1,17 @@
+from __future__ import annotations
+
 import hashlib
+import logging
+import os
 import re
 from collections.abc import Iterable
 from enum import Enum
+from typing import TYPE_CHECKING
 
-from persona_data.synth_persona import PersonaData
+if TYPE_CHECKING:
+    from persona_data.synth_persona import PersonaData
+
+logger = logging.getLogger(__name__)
 
 
 class DatasetSource(str, Enum):
@@ -72,6 +80,16 @@ def session_key(*parts: str) -> str:
     """Generate a colon-separated Streamlit session-state key from parts."""
 
     return ":".join(parts)
+
+
+def env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    """Read a bounded integer from the environment."""
+
+    try:
+        return max(minimum, int(os.environ.get(name, str(default))))
+    except ValueError:
+        logger.warning("Ignoring invalid integer for %s", name)
+        return default
 
 
 def personas_fingerprint(persona_ids: Iterable[str]) -> str:

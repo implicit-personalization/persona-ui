@@ -5,6 +5,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from utils.helpers import DATASET_SOURCES, session_key
+from utils.preload import preload_once
 from utils.runtime import list_remote_models
 from utils.theme import install_catppuccin_theme
 
@@ -28,6 +29,15 @@ _SIDEBAR_DATASET_SOURCE_KEY = session_key("sidebar", "dataset_source")
 
 _TABS = ["Chat", "Analysis", "Extract"]
 _TAB_ICONS = [":material/chat:", ":material/search:", ":material/tune:"]
+_TAB_PRELOAD_MODULES = {
+    "Chat": ("tabs.analysis_core", "tabs.extract", "tabs.compare_chat"),
+    "Analysis": ("tabs.chat", "tabs.extract"),
+    "Extract": ("tabs.chat", "tabs.analysis_core"),
+}
+_TAB_PRELOAD_FUNCTIONS = {
+    "Chat": ("utils.analysis_metadata:synth_persona_attribute_names",),
+    "Extract": ("utils.analysis_metadata:synth_persona_attribute_names",),
+}
 
 
 @dataclass(frozen=True)
@@ -180,6 +190,12 @@ def main() -> None:
         from tabs.chat import render_chat_tab
 
         render_chat_tab(sidebar.remote, sidebar.model_name, sidebar.dataset_source)
+
+    preload_once(
+        f"after-{sidebar.active_tab.lower()}",
+        modules=_TAB_PRELOAD_MODULES.get(sidebar.active_tab, ()),
+        functions=_TAB_PRELOAD_FUNCTIONS.get(sidebar.active_tab, ()),
+    )
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from pathlib import Path
 import plotly.graph_objects as go
 import streamlit as st
 from persona_data.environment import get_artifacts_dir
-from persona_data.synth_persona import BASELINE_PERSONA_ID, SynthPersonaDataset
+from persona_data.synth_persona import BASELINE_PERSONA_ID
 from persona_vectors.attributes import (
     DEFAULT_MAX_ATTRIBUTE_CATEGORIES,
     attribute_color_kwargs,
@@ -44,6 +44,10 @@ from utils.analysis_sources import (
     store_cache_parts,
     store_id,
     store_layers_cached,
+)
+from utils.analysis_metadata import (
+    synth_persona_attribute_names,
+    synth_persona_dataset_cached,
 )
 from utils.controls import render_mask_strategy_select
 from utils.helpers import (
@@ -99,9 +103,8 @@ _PROJECTION_COLOR_MODES = ["Persona", "K-means clusters", "Persona attribute"]
 _MAX_ATTRIBUTE_CATEGORIES = DEFAULT_MAX_ATTRIBUTE_CATEGORIES
 
 
-@st.cache_resource(show_spinner=False)
-def _synth_persona_dataset() -> SynthPersonaDataset:
-    return SynthPersonaDataset()
+def _synth_persona_dataset():
+    return synth_persona_dataset_cached()
 
 
 def _is_assistant_persona(persona_id: str, persona_name: str | None = None) -> bool:
@@ -983,7 +986,7 @@ def _render_projection_color_config(
 
     if color_mode == "Persona attribute":
         persona_dataset = _synth_persona_dataset()
-        attribute_options = list(persona_dataset.attribute_names)
+        attribute_options = list(synth_persona_attribute_names())
         if not attribute_options:
             st.info("No persona attributes are available for this dataset.")
             return None
