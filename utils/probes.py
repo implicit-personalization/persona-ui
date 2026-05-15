@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +18,16 @@ PROBE_FILENAME_RE = re.compile(
     r"(?P<location>pre_reasoning|post_reasoning)_all_(?P<scope>general|size\d+)\.pt$"
 )
 
+# persona-vectors layout: .../{model}/{mask}/{variant}/{attribute}/{probe_kind}[_pca{K}]_layer{N}/weights.safetensors
+PERSONA_PROBE_DIR_RE = re.compile(
+    r"^(?P<probe_kind>[a-z_]+?)(?:_pca(?P<pca>\d+))?_layer(?P<layer>\d+)$"
+)
+
 DEFAULT_PROBE_REPO = "project-telos/cognitive_map_probes"
+DEFAULT_LOCAL_PROBE_DIR = os.environ.get(
+    "PERSONA_PROBES_DIR",
+    "artifacts/probes",
+)
 
 
 @dataclass(frozen=True)
@@ -27,6 +38,8 @@ class ProbeFileMetadata:
     location: str | None
     scope: str | None
     label: str
+    model_name: str | None = None
+    attribute_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -81,11 +94,45 @@ class LoadedProbe:
     model_type: str
     layer: int | None
     location: str | None
+    model_name: str | None = None
+    attribute_name: str | None = None
+    feature_space: str | None = None
+    task: str | None = None
+    probe_kind: str | None = None
     scaler_mean: torch.Tensor | None = None
     scaler_std: torch.Tensor | None = None
+    pca_mean: torch.Tensor | None = None
+    pca_components: torch.Tensor | None = None
 
     def __post_init__(self) -> None:
         self.model.eval()
+
+    @property
+    def is_regression(self) -> bool:
+        """True when the probe outputs a continuous value rather than a class."""
+        if self.task is not None:
+            return self.task in {"numeric", "ordinal"}
+        if self.probe_kind is not None:
+            return self.probe_kind == "ridge_regression"
+        return False
+
+    def predict_batch(self, activations: torch.Tensor) -> torch.Tensor:
+        """Return raw linear-output values for each token — no sigmoid/softmax."""
+        if activations.ndim != 2:
+            raise ValueError(
+                f"predict_batch expects [N, hidden], got {tuple(activations.shape)}"
+            )
+        if activations.shape[1] != self.input_dim:
+            raise ValueError(
+                f"Probe expects input dim {self.input_dim}, got {activations.shape[1]}"
+            )
+        batch = activations.detach().to(dtype=torch.float32, device="cpu")
+        normalized = self._normalize_batch(batch)
+        with torch.no_grad():
+            outputs = self.model(normalized).detach().cpu()
+        if outputs.ndim == 1:
+            outputs = outputs.unsqueeze(-1)
+        return outputs
 
     def run(self, vector: torch.Tensor) -> ProbeRunResult:
         if vector.ndim != 1:
@@ -97,78 +144,150 @@ class LoadedProbe:
                 f"Probe expects input dim {self.input_dim}, got {vector.shape[0]}"
             )
 
-        normalized = self._normalize(
-            vector.detach().to(dtype=torch.float32, device="cpu")
-        )
-        with torch.no_grad():
-            logits = self.model(normalized.unsqueeze(0)).squeeze(0).detach().cpu()
-
+        batch = vector.detach().to(dtype=torch.float32, device="cpu").unsqueeze(0)
+        logits_batch, probs_batch = self._forward_batch(batch)
+        logits = logits_batch.squeeze(0)
+        probs = probs_batch.squeeze(0)
         if logits.ndim == 0:
             logits = logits.unsqueeze(0)
-        if logits.numel() == 1:
-            probs = torch.sigmoid(logits).view(1)
-            predicted_index = 0
-        else:
-            probs = F.softmax(logits, dim=-1)
-            predicted_index = int(torch.argmax(probs).item())
+        if probs.ndim == 0:
+            probs = probs.unsqueeze(0)
 
+        predicted_index = (
+            0 if probs.numel() == 1 else int(torch.argmax(probs).item())
+        )
         predicted_label = (
             self.labels[predicted_index]
             if 0 <= predicted_index < len(self.labels)
             else None
         )
         return ProbeRunResult(
-            input_dim=int(normalized.shape[0]),
+            input_dim=int(vector.shape[0]),
             logits=logits,
             probabilities=probs,
             predicted_index=predicted_index,
             predicted_label=predicted_label,
         )
 
-    def _normalize(self, vector: torch.Tensor) -> torch.Tensor:
+    def run_batch(
+        self, activations: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Run the probe over a batch of activations.
+
+        Returns ``(logits[N, C], probs[N, C], predicted_index[N])``. For
+        single-output probes ``C == 1`` and ``probs`` holds sigmoid scores.
+        """
+        if activations.ndim != 2:
+            raise ValueError(
+                f"run_batch expects [N, hidden], got {tuple(activations.shape)}"
+            )
+        if activations.shape[1] != self.input_dim:
+            raise ValueError(
+                f"Probe expects input dim {self.input_dim}, got {activations.shape[1]}"
+            )
+        batch = activations.detach().to(dtype=torch.float32, device="cpu")
+        logits, probs = self._forward_batch(batch)
+        if probs.shape[-1] == 1:
+            predicted = (probs.squeeze(-1) >= 0.5).long()
+        else:
+            predicted = torch.argmax(probs, dim=-1)
+        return logits, probs, predicted
+
+    def _forward_batch(
+        self, batch: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        normalized = self._normalize_batch(batch)
+        with torch.no_grad():
+            logits = self.model(normalized).detach().cpu()
+        if logits.ndim == 1:
+            logits = logits.unsqueeze(-1)
+        if logits.shape[-1] == 1:
+            probs = torch.sigmoid(logits)
+        else:
+            probs = F.softmax(logits, dim=-1)
+        return logits, probs
+
+    def _normalize_batch(self, batch: torch.Tensor) -> torch.Tensor:
         if self.scaler_mean is None or self.scaler_std is None:
-            return vector
+            return batch
         mean = self.scaler_mean.to(dtype=torch.float32)
         std = self.scaler_std.to(dtype=torch.float32)
-        if mean.shape != vector.shape or std.shape != vector.shape:
+        if mean.ndim != 1 or std.ndim != 1 or mean.shape[0] != batch.shape[1]:
             raise ValueError(
-                "Probe scaler shape does not match activation vector shape: "
+                "Probe scaler shape does not match activation hidden size: "
                 f"mean={tuple(mean.shape)} std={tuple(std.shape)} "
-                f"vector={tuple(vector.shape)}"
+                f"batch={tuple(batch.shape)}"
             )
         safe_std = torch.where(std == 0, torch.ones_like(std), std)
-        return (vector - mean) / safe_std
+        batch = (batch - mean) / safe_std
+        if self.pca_mean is None or self.pca_components is None:
+            return batch
+        pca_mean = self.pca_mean.to(dtype=torch.float32)
+        components = self.pca_components.to(dtype=torch.float32)
+        if pca_mean.ndim != 1 or pca_mean.shape[0] != batch.shape[1]:
+            raise ValueError(
+                "Probe PCA mean shape does not match activation hidden size: "
+                f"mean={tuple(pca_mean.shape)} batch={tuple(batch.shape)}"
+            )
+        return (batch - pca_mean) @ components.T
+
+
+def model_probe_dir_name(model_name: str) -> str:
+    return model_name.replace("/", "__")
 
 
 def parse_probe_filename(filename: str) -> ProbeFileMetadata:
-    match = PROBE_FILENAME_RE.match(Path(filename).name)
-    if not match:
-        stem = Path(filename).stem.replace("_", " ")
+    path = Path(filename)
+    match = PROBE_FILENAME_RE.match(path.name)
+    if match:
+        layer = int(match.group("layer"))
+        model_type = match.group("model_type")
+        location = match.group("location")
+        scope = match.group("scope")
+        scope_label = scope.replace("size", "size ")
         return ProbeFileMetadata(
             filename=filename,
-            layer=None,
-            model_type="unknown",
-            location=None,
-            scope=None,
-            label=stem,
+            layer=layer,
+            model_type=model_type,
+            location=location,
+            scope=scope,
+            label=(
+                f"Layer {layer} - {model_type.upper()} - "
+                f"{location.replace('_', ' ')} - {scope_label}"
+            ),
         )
 
-    layer = int(match.group("layer"))
-    model_type = match.group("model_type")
-    location = match.group("location")
-    scope = match.group("scope")
-    scope_label = scope.replace("size", "size ")
-    label = (
-        f"Layer {layer} - {model_type.upper()} - "
-        f"{location.replace('_', ' ')} - {scope_label}"
-    )
+    # persona-vectors layout: parent dir holds probe_kind[_pca{K}]_layer{N},
+    # and the dir above that is the attribute name.
+    parent_match = PERSONA_PROBE_DIR_RE.match(path.parent.name)
+    if parent_match and path.name in {"probe.json", "weights.safetensors"}:
+        layer = int(parent_match.group("layer"))
+        probe_kind = parent_match.group("probe_kind")
+        pca = parent_match.group("pca")
+        scope = f"pca{pca}" if pca else None
+        attribute = path.parent.parent.name or "attribute"
+        model_name = path.parts[0].replace("__", "/") if len(path.parts) >= 5 else None
+        label = f"{attribute} - layer {layer} - {probe_kind}"
+        if pca:
+            label += f" (pca{pca})"
+        return ProbeFileMetadata(
+            filename=filename,
+            layer=layer,
+            model_type=probe_kind,
+            location=None,
+            scope=scope,
+            label=label,
+            model_name=model_name,
+            attribute_name=attribute,
+        )
+
     return ProbeFileMetadata(
         filename=filename,
-        layer=layer,
-        model_type=model_type,
-        location=location,
-        scope=scope,
-        label=label,
+        layer=None,
+        model_type="unknown",
+        location=None,
+        scope=None,
+        label=path.stem.replace("_", " "),
     )
 
 
@@ -177,7 +296,20 @@ def list_probe_files(repo_id: str) -> list[str]:
     from huggingface_hub import list_repo_files
 
     files = list_repo_files(repo_id, repo_type="model")
-    return sorted(path for path in files if path.endswith(".pt"))
+    return _dedupe_probe_entries(files)
+
+
+@st.cache_data(show_spinner=False, ttl=30)
+def list_local_probe_files(root_dir: str) -> list[str]:
+    root = Path(root_dir).expanduser()
+    if not root.is_dir():
+        return []
+    files = _dedupe_probe_entries([
+        str(path.relative_to(root))
+        for path in root.rglob("*")
+        if path.is_file() and path.name in {"probe.pt", "probe.json", "weights.safetensors"}
+    ])
+    return sorted(files, key=_probe_sort_key)
 
 
 @st.cache_data(show_spinner=False, ttl=300)
@@ -187,9 +319,50 @@ def download_probe_file(repo_id: str, filename: str) -> str:
     return hf_hub_download(repo_id, filename, repo_type="model")
 
 
+@st.cache_data(show_spinner=False, ttl=300)
+def download_probe_json_and_weights(repo_id: str, filename: str) -> tuple[str, str]:
+    from huggingface_hub import hf_hub_download
+
+    metadata_path = hf_hub_download(repo_id, filename, repo_type="model")
+    weights_name = str(Path(filename).with_name("weights.safetensors"))
+    weights_path = hf_hub_download(repo_id, weights_name, repo_type="model")
+    return metadata_path, weights_path
+
+
 @st.cache_resource(show_spinner=False)
 def load_probe(repo_id: str, filename: str) -> LoadedProbe:
+    if filename.endswith("probe.json"):
+        metadata_path, weights_path = download_probe_json_and_weights(repo_id, filename)
+        return _load_persona_probe_artifact(
+            filename=filename,
+            metadata_path=Path(metadata_path),
+            weights_path=Path(weights_path),
+        )
     path = download_probe_file(repo_id, filename)
+    return _load_probe_payload(
+        filename=filename,
+        payload=_torch_load(path),
+    )
+
+
+@st.cache_resource(show_spinner=False)
+def load_local_probe(root_dir: str, filename: str) -> LoadedProbe:
+    root = Path(root_dir).expanduser()
+    path = (root / filename).resolve()
+    if root.resolve() not in path.parents:
+        raise ValueError("Probe path must stay inside the selected local directory.")
+    if path.name == "probe.json":
+        return _load_persona_probe_artifact(
+            filename=filename,
+            metadata_path=path,
+            weights_path=path.with_name("weights.safetensors"),
+        )
+    if path.name == "weights.safetensors":
+        return _load_persona_probe_artifact(
+            filename=filename,
+            metadata_path=path.with_name("probe.json"),
+            weights_path=path,
+        )
     return _load_probe_payload(
         filename=filename,
         payload=_torch_load(path),
@@ -215,16 +388,24 @@ def _load_probe_payload(
     metadata = parse_probe_filename(filename)
     state_dict = _get_state_dict(payload)
     input_dim = _coerce_probe_dim(payload.get("input_dim"), state_dict, dim="input")
+    model_input_dim = _coerce_probe_dim(
+        payload.get("artifact_feature_dim") or input_dim,
+        state_dict,
+        dim="input",
+    )
     num_classes = _coerce_probe_dim(
         payload.get("num_classes"), state_dict, dim="classes"
     )
     model = _build_probe_module(
         payload,
         state_dict=state_dict,
-        input_dim=input_dim,
+        input_dim=model_input_dim,
         num_classes=num_classes,
     )
-    labels = _normalize_labels(payload.get("idx_to_label"), num_classes)
+    labels = _normalize_labels(
+        payload.get("idx_to_label") or payload.get("class_names"),
+        num_classes,
+    )
 
     raw_layer = payload.get("layer")
     try:
@@ -245,13 +426,59 @@ def _load_probe_payload(
         model_type=str(payload.get("model_type") or metadata.model_type),
         layer=layer,
         location=location,
+        model_name=_optional_str(payload.get("model_name")) or metadata.model_name,
+        attribute_name=(
+            _optional_str(payload.get("attribute_name")) or metadata.attribute_name
+        ),
+        feature_space=(
+            (f"pca{payload['n_pca_components']}"
+             if payload.get("n_pca_components")
+             else None)
+            or _optional_str(payload.get("feature_space"))
+            or metadata.scope
+        ),
+        task=_optional_str(payload.get("task")),
+        probe_kind=_optional_str(payload.get("probe_kind")),
         scaler_mean=_as_cpu_tensor(payload.get("scaler_mean")),
-        scaler_std=_as_cpu_tensor(payload.get("scaler_std")),
+        scaler_std=_as_cpu_tensor(_first_present(payload, "scaler_std", "scaler_scale")),
+        pca_mean=_as_cpu_tensor(payload.get("pca_mean")),
+        pca_components=_as_cpu_tensor(payload.get("pca_components")),
     )
 
 
 def _torch_load(file_or_buffer: object) -> object:
     return torch.load(file_or_buffer, map_location="cpu", weights_only=True)
+
+
+def _load_persona_probe_artifact(
+    *,
+    filename: str,
+    metadata_path: Path,
+    weights_path: Path,
+) -> LoadedProbe:
+    if not metadata_path.is_file():
+        raise FileNotFoundError(f"Missing probe metadata file: {metadata_path}")
+    if not weights_path.is_file():
+        raise FileNotFoundError(f"Missing probe weights file: {weights_path}")
+    from safetensors.torch import load_file
+
+    metadata = json.loads(metadata_path.read_text())
+    tensors = load_file(str(weights_path), device="cpu")
+    payload = {
+        **metadata,
+        "model_type": "linear",
+        "model_state_dict": {
+            "linear.weight": tensors["weight"],
+            "linear.bias": tensors["bias"],
+        },
+        "num_classes": int(tensors["weight"].shape[0]),
+        "idx_to_label": metadata.get("class_names"),
+        "scaler_mean": tensors.get("scaler_mean"),
+        "scaler_std": tensors.get("scaler_scale"),
+        "pca_mean": tensors.get("pca_mean"),
+        "pca_components": tensors.get("pca_components"),
+    }
+    return _load_probe_payload(filename=filename, payload=payload)
 
 
 def _build_probe_module(
@@ -368,6 +595,53 @@ def _as_cpu_tensor(value: Any) -> torch.Tensor | None:
     if not isinstance(value, torch.Tensor):
         return None
     return value.detach().cpu()
+
+
+def _optional_str(value: Any) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _first_present(payload: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _probe_sort_key(filename: str) -> tuple[str, str, int, str]:
+    metadata = parse_probe_filename(filename)
+    return (
+        metadata.model_name or "",
+        metadata.attribute_name or "",
+        metadata.layer if metadata.layer is not None else 10**9,
+        filename,
+    )
+
+
+def _dedupe_probe_entries(files: list[str]) -> list[str]:
+    by_dir: dict[str, set[str]] = {}
+    standalone: list[str] = []
+    for filename in files:
+        path = Path(filename)
+        if path.name in {"probe.pt", "probe.json", "weights.safetensors"}:
+            by_dir.setdefault(str(path.parent), set()).add(path.name)
+        elif filename.endswith(".pt"):
+            standalone.append(filename)
+
+    entries = list(standalone)
+    for directory, names in by_dir.items():
+        selected = (
+            "probe.json"
+            if "probe.json" in names
+            else "probe.pt"
+            if "probe.pt" in names
+            else "weights.safetensors"
+        )
+        entries.append(str(Path(directory) / selected))
+    return sorted(entries, key=_probe_sort_key)
 
 
 def _normalize_labels(raw_labels: Any, num_classes: int) -> list[str | None]:

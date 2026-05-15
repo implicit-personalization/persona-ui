@@ -3,8 +3,8 @@ import os
 import streamlit as st
 from persona_vectors.analysis import LayeredSamples, load_persona_vectors
 from persona_vectors.artifacts import (
-    ActivationStore,
-    HFActivationStore,
+    PersonaVectorStore,
+    HFPersonaVectorStore,
     discover_activation_models,
     model_dir_name,
 )
@@ -13,7 +13,7 @@ from persona_vectors.hub import list_hub_vector_models
 
 from utils.helpers import env_int
 
-Store = ActivationStore | HFActivationStore
+Store = PersonaVectorStore | HFPersonaVectorStore
 
 DEFAULT_HUB_REPO = os.environ.get(
     "PERSONA_VECTORS_HUB_REPO",
@@ -21,11 +21,12 @@ DEFAULT_HUB_REPO = os.environ.get(
 )
 DEFAULT_COMPARE_MODEL = os.environ.get("DEFAULT_MODEL", "google/gemma-2-2b-it")
 SOURCE_HUB = "Hugging Face Hub"
-SOURCE_LOCAL = "Local activations"
+SOURCE_LOCAL = "Local artifacts"
 SOURCES = (SOURCE_HUB, SOURCE_LOCAL)
 
 
 _STORE_CACHE_ENTRIES = env_int("PERSONA_UI_STORE_CACHE_ENTRIES", 4)
+_VECTOR_CACHE_ENTRIES = env_int("PERSONA_UI_VECTOR_CACHE_ENTRIES", 2)
 
 
 @st.cache_resource(show_spinner=False, max_entries=_STORE_CACHE_ENTRIES)
@@ -37,8 +38,8 @@ def activation_store_cached(
 ) -> Store:
     mask_strategy = MaskStrategy(mask_strategy_value)
     if source == SOURCE_HUB:
-        return HFActivationStore(location, model_name, mask_strategy=mask_strategy)
-    return ActivationStore(model_name, location, mask_strategy=mask_strategy)
+        return HFPersonaVectorStore(location, model_name, mask_strategy=mask_strategy)
+    return PersonaVectorStore(model_name, location, mask_strategy=mask_strategy)
 
 
 @st.cache_data(show_spinner=False)
@@ -60,10 +61,12 @@ def personas_cached(
     model_name: str,
     mask_strategy_value: str,
     variants: tuple[str, ...],
+    *,
+    include_baseline: bool = False,
 ) -> list[str]:
     return activation_store_cached(
         source, location, model_name, mask_strategy_value
-    ).list_personas(list(variants))
+    ).list_personas(list(variants), include_baseline=include_baseline)
 
 
 @st.cache_data(show_spinner=False)
@@ -113,13 +116,13 @@ def hub_models_by_mask_strategy(repo_id: str) -> dict[MaskStrategy, list[str]]:
 
 
 def store_cache_parts(store: Store) -> tuple[str, str, str]:
-    if isinstance(store, HFActivationStore):
+    if isinstance(store, HFPersonaVectorStore):
         return SOURCE_HUB, store.repo_id, store.model_name
     return SOURCE_LOCAL, str(store.root_dir), store.model_name
 
 
 def store_id(store: Store) -> str:
-    if isinstance(store, HFActivationStore):
+    if isinstance(store, HFPersonaVectorStore):
         return f"hub:{store.repo_id}"
     return f"local:{store.root_dir}"
 
@@ -133,6 +136,7 @@ def local_model_matches(left: str, right: str) -> bool:
     return model_dir_name(left) == model_dir_name(right)
 
 
+@st.cache_resource(show_spinner=False, max_entries=_VECTOR_CACHE_ENTRIES)
 def load_persona_vectors_cached(
     source: str,
     location: str,
@@ -166,11 +170,37 @@ def load_variant_vectors_cached(
     }
 
 
+def prefetch_hub_metadata(
+    repo_id: str,
+    model_name: str,
+    mask_strategy_value: str,
+    variant: str | None = None,
+) -> None:
+    """Warm small Hub metadata caches without loading full activation tensors."""
+    if not repo_id or not model_name or not mask_strategy_value:
+        return
+    hub_models_by_mask_strategy(repo_id)
+    available_variants_cached(
+        SOURCE_HUB,
+        repo_id,
+        model_name,
+        mask_strategy_value,
+    )
+    if variant:
+        personas_cached(
+            SOURCE_HUB,
+            repo_id,
+            model_name,
+            mask_strategy_value,
+            (variant,),
+        )
+
+
 def release_hf_store_cache(
     store: Store,
     variants: list[str] | tuple[str, ...] | None = None,
 ) -> None:
     """Drop cached HF data for ``variants`` (or all) on Hub stores."""
     release_cache = getattr(store, "release_cache", None)
-    if isinstance(store, HFActivationStore) and callable(release_cache):
+    if isinstance(store, HFPersonaVectorStore) and callable(release_cache):
         release_cache(variants)

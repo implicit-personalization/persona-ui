@@ -65,7 +65,7 @@ def _filename(*parts: str) -> str:
     return "__".join(slugify(part) for part in parts if part)
 
 
-# Keep compare-tab selection state separate so projection defaults do not
+# Keep analysis-tab selection state separate so projection defaults do not
 # overwrite cosine similarity defaults.
 _LAST_COSINE_PERSONAS_KEY = "analysis:last_personas:cosine"
 _LAST_PROJECTION_PERSONAS_KEY = "analysis:last_personas:projection"
@@ -101,10 +101,6 @@ _CLUSTER_MODES = {
 }
 _PROJECTION_COLOR_MODES = ["Persona", "K-means clusters", "Persona attribute"]
 _MAX_ATTRIBUTE_CATEGORIES = DEFAULT_MAX_ATTRIBUTE_CATEGORIES
-
-
-def _synth_persona_dataset():
-    return synth_persona_dataset_cached()
 
 
 def _is_assistant_persona(persona_id: str, persona_name: str | None = None) -> bool:
@@ -386,6 +382,7 @@ def _load_persona_options(
         model_name,
         mask_strategy.value,
         variant_key,
+        include_baseline=True,
     )
     if not persona_ids:
         st.info(empty_message)
@@ -985,7 +982,7 @@ def _render_projection_color_config(
         )
 
     if color_mode == "Persona attribute":
-        persona_dataset = _synth_persona_dataset()
+        persona_dataset = synth_persona_dataset_cached()
         attribute_options = list(synth_persona_attribute_names())
         if not attribute_options:
             st.info("No persona attributes are available for this dataset.")
@@ -1149,7 +1146,7 @@ def _projection_build_kwargs(
     if color_config.attribute_name is not None:
         build_kwargs.update(
             attribute_color_kwargs(
-                _synth_persona_dataset(),
+                synth_persona_dataset_cached(),
                 color_config.attribute_name,
                 persona_ids,
                 max_categories=_MAX_ATTRIBUTE_CATEGORIES,
@@ -1194,6 +1191,8 @@ def _build_layered_analysis_figures(
         title=title_fn(variant),
         **build_kwargs,
     )
+    if figure_kind == "isomap":
+        _add_isomap_connection_toggle(main_fig)
     if figure_kind in _PROJECTION_KINDS:
         main_fig.update_layout(height=700)
     extra_fig = (
@@ -1209,6 +1208,42 @@ def _build_layered_analysis_figures(
         else None
     )
     return main_fig, extra_fig
+
+
+def _add_isomap_connection_toggle(fig: go.Figure) -> None:
+    """Add an in-plot control for the Isomap kNN graph trace."""
+    if not fig.data or fig.data[0].name != "kNN graph":
+        return
+
+    existing_menus = tuple(fig.layout.updatemenus or ())
+    fig.update_layout(
+        updatemenus=existing_menus
+        + (
+            dict(
+                type="buttons",
+                direction="left",
+                active=0,
+                showactive=False,
+                x=0,
+                xanchor="left",
+                y=1.16,
+                yanchor="top",
+                pad=dict(t=0, r=10),
+                buttons=[
+                    dict(
+                        label="Show connections",
+                        method="restyle",
+                        args=[{"visible": True}, [0]],
+                    ),
+                    dict(
+                        label="Hide connections",
+                        method="restyle",
+                        args=[{"visible": False}, [0]],
+                    ),
+                ],
+            ),
+        ),
+    )
 
 
 def _render_layered_figure_analysis(
@@ -1354,6 +1389,45 @@ _LAST_DENDRO_PERSONAS_KEY = "analysis:last_personas:dendro"
 _DENDRO_LINKAGE_OPTIONS = ["ward", "complete", "average", "single"]
 
 
+def _render_persona_select_controls(
+    options: PersonaOptions,
+    widget_scope: str,
+) -> list[str]:
+    select_key = widget_key("load", "persona_select", widget_scope)
+    assistant_key = widget_key("load", "persona_select_assistant", widget_scope)
+
+    label_map = {
+        pid: f"{options.persona_names.get(pid, pid)} ({pid})"
+        for pid in options.regular_ids
+    }
+    sorted_labels = sorted(label_map.values())
+    selected_labels = st.multiselect(
+        "Select personas",
+        options=sorted_labels,
+        key=select_key,
+        placeholder="Search and select personas...",
+    )
+    label_to_id = {v: k for k, v in label_map.items()}
+    selected_ids = [label_to_id[lbl] for lbl in selected_labels]
+
+    if options.assistant_id is not None:
+        include_assistant = st.checkbox(
+            "Include Assistant persona",
+            key=assistant_key,
+        )
+        if include_assistant:
+            selected_ids.append(options.assistant_id)
+
+    st.session_state[_persona_names_state_key(widget_scope)] = dict(
+        options.persona_names
+    )
+
+    if not selected_ids:
+        st.info("Select at least one persona.")
+
+    return selected_ids
+
+
 def _render_dendrogram_analysis(
     store: Store,
     mask_strategy: MaskStrategy,
@@ -1389,16 +1463,49 @@ def _render_dendrogram_analysis(
             )
 
     shared_variants = list(dict.fromkeys([variant_a, variant_b]))
-    persona_ids = _select_artifact_personas(
-        store,
-        shared_variants,
-        mask_strategy,
-        widget_scope=f"dendro:{store_id(store)}",
-        remember_key=_LAST_DENDRO_PERSONAS_KEY,
-        default_count_limit=_DEFAULT_PERSONA_LIMITS["dendro"],
+
+    select_specific = st.toggle(
+        "Select specific personas",
+        value=False,
+        key=widget_key("load", "dendro_select_mode", store_id(store)),
+        help="Search and select specific personas instead of using the first N.",
     )
-    if not persona_ids:
-        return
+
+    if select_specific:
+        empty_message = (
+            "No personas have vectors for all selected variants. "
+            "Pick a single variant or change the source."
+            if len(shared_variants) > 1
+            else "No personas found for this model and variant."
+        )
+        options = _load_persona_options(
+            store,
+            shared_variants,
+            mask_strategy,
+            empty_message=empty_message,
+        )
+        if options is None:
+            st.session_state.pop(
+                _persona_names_state_key(f"dendro:{store_id(store)}"), None
+            )
+            return
+        persona_ids = _render_persona_select_controls(
+            options,
+            widget_scope=f"dendro:{store_id(store)}",
+        )
+        if not persona_ids:
+            return
+    else:
+        persona_ids = _select_artifact_personas(
+            store,
+            shared_variants,
+            mask_strategy,
+            widget_scope=f"dendro:{store_id(store)}",
+            remember_key=_LAST_DENDRO_PERSONAS_KEY,
+            default_count_limit=_DEFAULT_PERSONA_LIMITS["dendro"],
+        )
+        if not persona_ids:
+            return
 
     col_opts1, col_opts2 = st.columns(2)
     with col_opts1:
@@ -1563,7 +1670,7 @@ def _render_hub_model_select(
             "Hub model",
             value=fallback_model,
             key="analysis:hub_model_fallback",
-            help="Compare-only model id to use if Hub config discovery is unavailable.",
+            help="Analysis-only model id to use if Hub config discovery is unavailable.",
         )
 
     model_options = models_by_strategy.get(mask_strategy, [])
@@ -1575,7 +1682,7 @@ def _render_hub_model_select(
             "Hub model",
             value=fallback_model,
             key="analysis:hub_model_fallback",
-            help="Compare-only model id to use for this Hub repo.",
+            help="Analysis-only model id to use for this Hub repo.",
         )
 
     previous_model = st.session_state.get(
@@ -1606,7 +1713,7 @@ def _render_local_model_select(
             "Local model",
             value=fallback_model,
             key="analysis:local_model",
-            help="Compare-only local model id or path.",
+            help="Analysis-only local model id or path.",
         )
 
     custom = st.toggle(
@@ -1620,7 +1727,7 @@ def _render_local_model_select(
             "Local model",
             value=fallback_model,
             key="analysis:local_model",
-            help="Compare-only local model id or path.",
+            help="Analysis-only local model id or path.",
         )
 
     previous_model = st.session_state.get("analysis:local_model_select", fallback_model)

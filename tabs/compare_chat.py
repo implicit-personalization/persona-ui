@@ -263,15 +263,14 @@ def _render_compare_footer(
     generation: GenerationConfig,
 ) -> None:
     # Bumping this nonce after a reset gives the popover a fresh widget key,
-    # which forces Streamlit to re-mount it closed (popovers don't auto-close
-    # on click).
+    # which forces Streamlit to re-mount it closed (popovers don't auto-close on click).
     reset_menu_nonce_key = widget_key(context_key, "cmp_reset_menu_nonce")
     if reset_menu_nonce_key not in st.session_state:
         st.session_state[reset_menu_nonce_key] = 0
 
     footer = st.container()
     with footer:
-        exp_col, rst_col, _spacer = st.columns([0.5, 0.5, 10], gap="xsmall")
+        exp_col, rst_col, _spacer = st.columns([1, 1.25, 17.5], gap="xsmall")
         with exp_col:
             if st.button(
                 "",

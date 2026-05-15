@@ -17,11 +17,12 @@ Streamlit interface for persona vector extraction, analysis, and chat.
 
 ## Overview
 
-A web app built on top of [persona-vectors](../persona-vectors) that provides three tabs:
+A web app built on top of [persona-vectors](../persona-vectors) that provides these tabs:
 
 - **Chat** — interactive conversations with a model using persona-based system prompts (templated or biography)
-- **Compare** — load local or Hub persona vectors and explore cosine similarity, PCA, UMAP, attribute-colored projections, and dendrograms
-- **Extract** — run activation extraction from HuggingFace persona datasets or a local JSONL dataset directly from the browser
+- **Analysis** — load local or Hub persona vectors and explore cosine similarity, PCA, UMAP, attribute-colored projections, and dendrograms
+- **Probing** — sweep and inspect linear probes trained over saved persona vectors
+- **Extract** — run persona-vector extraction from HuggingFace persona datasets or a local JSONL dataset directly from the browser
 
 ## Repository Layout
 
@@ -30,18 +31,21 @@ persona-ui/
 ├── app.py                   # Main entry point (Streamlit)
 ├── state.py                 # Session state management (chat history, KV cache)
 ├── tabs/
-│   ├── chat.py              # Chat tab
-│   ├── analysis.py          # Analysis tab (cosine similarity, PCA, UMAP, Isomap, dendrogram)
+│   ├── chat.py / chat_ui.py / chat_shared.py  # Chat tab
+│   ├── analysis_core.py                       # Analysis tab (cosine sim, PCA, UMAP, Isomap, dendrogram)
 │   ├── compare_chat.py      # Side-by-side chat comparison mode
 │   ├── extract.py           # Extraction tab
+│   ├── probe.py             # Probe sweep + diagnostics tab
 │   └── probe_ui.py          # Probe upload and tracing controls
 └── utils/
+    ├── analysis_sources.py  # Local + Hub persona-vector store wiring
     ├── chat.py              # Chat generation logic
     ├── chat_export.py       # Export chat logs to JSON
     ├── contrast.py          # Contrastive token log-prob coloring
     ├── datasets.py          # Dataset loader wrapper
     ├── helpers.py           # UI labels and slug helpers
     ├── probe_trace.py       # Chat-token activation tracing
+    ├── probe_overlay.py     # Per-token probe-score overlay
     ├── probes.py            # Probe loading and scoring
     └── runtime.py           # Model caching and NDIF queries
 ```
@@ -110,25 +114,37 @@ Copy `.env.example` to `.env` and fill in:
 ```bash
 NDIF_API_KEY=...       # Required for remote (NDIF) model execution
 HF_HOME=...            # Optional: HuggingFace cache directory
-ARTIFACTS_DIR=...      # Optional: where activations are read from (default: ./artifacts)
-PERSONA_VECTORS_HUB_REPO=...  # Optional: default Compare-tab Hub dataset repo
+ARTIFACTS_DIR=...      # Optional: where persona vectors are read from (default: ./artifacts)
+PERSONA_VECTORS_HUB_REPO=...  # Optional: default Analysis/Probing Hub dataset repo
 ```
 
 The app picks up this file automatically via `load_dotenv()` on startup.
 
 ## Persona Vectors
 
-The Compare tab reads persona vectors from either a Hugging Face dataset created
-by `persona-vectors/scripts/push_to_hf.py` or from local artifacts. The Extract
-tab writes local artifacts to:
+The Analysis and Probing tabs read persona vectors from either a Hugging Face
+dataset (pushed by `persona-vectors/main.py push` or the
+`extraction_*.sh` scripts) or from local artifacts. The Extract tab writes
+local artifacts to:
 
 ```
 artifacts/
-├── activations/<model_dir>/<mask_strategy>/<prompt_variant>/
+├── activations/<model_dir>/<mask_strategy>/<prompt_variant>/   # also: persona-vectors/...
 │   ├── manifest.json
 │   └── <persona_id>.safetensors
 └── chats/<model_dir>/<persona_id>/
     └── <export>.json
 ```
 
-`<model_dir>` is the model name with `/` replaced by `__` (e.g. `google__gemma-2-9b-it`). The manifest stores persona names, tensor shape metadata, and sample ids. Chat exports still store `dataset_source` in the JSON payload.
+`<model_dir>` is the model name with `/` replaced by `__` (e.g.
+`google__gemma-2-9b-it`). The manifest stores persona names, tensor shape
+metadata, and sample ids. Chat exports still store `dataset_source` in the
+JSON payload.
+
+The all-questions extraction script (`persona-vectors/scripts/extraction_all_questions.sh`)
+writes to `artifacts/persona-vectors/` instead of `artifacts/activations/`,
+so all-questions and train-split runs can coexist; point `ARTIFACTS_DIR` (or
+the Analysis/Probing tab's Local source path) at the tree you want to load.
+
+The store classes are `PersonaVectorStore` (local) and `HFPersonaVectorStore`
+(Hub) — same API, both imported by `utils/analysis_sources.py`.

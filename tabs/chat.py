@@ -160,6 +160,8 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         )
         return
 
+    probe_container = st.container()
+
     persona_select_key = widget_key(context_key, "persona_select")
     prompt_mode_select_key = widget_key(context_key, "system_prompt_select")
     prompt_key = widget_key(context_key, "custom_system_prompt")
@@ -221,17 +223,22 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
             ),
         )
 
-    if tools.probe_enabled:
-        from tabs.probe_ui import render_probe_inspector
+    with probe_container:
+        if tools.probe_enabled:
+            from tabs.probe_ui import render_probe_inspector
 
-        render_probe_inspector(
-            context_key=context_key,
-            model_name=model_name,
-            remote=remote,
-            active_system_prompt=active_system_prompt,
-            chat_state=chat_state,
-            enabled=True,
-        )
+            render_probe_inspector(
+                context_key=context_key,
+                model_name=model_name,
+                remote=remote,
+                active_system_prompt=active_system_prompt,
+                chat_state=chat_state,
+                enabled=True,
+            )
+        else:
+            from utils.probe_overlay import clear_overlays
+
+            clear_overlays(chat_state["messages"])
 
     render_chat_window(
         chat_log=chat_log,

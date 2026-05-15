@@ -5,13 +5,14 @@ description = "Streamlit UI for persona-vectors"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "persona-vectors>=0.8.0",
+    "persona-vectors>=0.8.1",
     "datasets>=4.8.5",
     "huggingface-hub>=1.14.0",
     "streamlit>=1.44.0",
     "plotly>=6.6.0",
     "python-dotenv>=1.2.2",
     "catppuccin>=2.5.0",
+    "safetensors>=0.7.0",
 ]
 
 # Local development:

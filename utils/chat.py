@@ -50,7 +50,7 @@ def resolve_system_prompt(
     if persona is None or mode == "empty":
         return ""
     if mode == "custom":
-        return format_prompt(mode="conversational")
+        return format_prompt(persona, "templated", mode="conversational")
     if mode in ("templated", "biography"):
         return format_prompt(persona, mode, mode="conversational")
     raise ValueError(f"Unsupported system prompt mode: {mode}")

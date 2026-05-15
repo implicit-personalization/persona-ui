@@ -149,34 +149,32 @@ def render_advanced_settings(
     last_probe_enabled_key: str = "",
     last_token_contrast_key: str = "",
 ) -> tuple[GenerationConfig, ChatTools]:
-    """Render the Advanced expander: tool toggles + generation settings."""
-    with st.expander("Advanced", expanded=False):
-        st.caption("Tools")
+    """Render the two advanced expanders: chat tools + generation."""
+    compare_key = widget_key(context_key, "compare_mode")
+    if compare_key not in st.session_state:
+        st.session_state[compare_key] = st.session_state.get(
+            last_compare_mode_key, False
+        )
 
-        compare_key = widget_key(context_key, "compare_mode")
-        if compare_key not in st.session_state:
-            st.session_state[compare_key] = st.session_state.get(
-                last_compare_mode_key, False
-            )
+    probe_key = widget_key(context_key, "probe_enabled")
+    if probe_key not in st.session_state:
+        st.session_state[probe_key] = st.session_state.get(
+            last_probe_enabled_key, False
+        )
 
-        probe_key = widget_key(context_key, "probe_enabled")
-        if probe_key not in st.session_state:
-            st.session_state[probe_key] = st.session_state.get(
-                last_probe_enabled_key, False
-            )
+    token_contrast_key = widget_key(context_key, "token_contrast")
+    if token_contrast_key not in st.session_state:
+        st.session_state[token_contrast_key] = st.session_state.get(
+            last_token_contrast_key, False
+        )
 
-        token_contrast_key = widget_key(context_key, "token_contrast")
-        if token_contrast_key not in st.session_state:
-            st.session_state[token_contrast_key] = st.session_state.get(
-                last_token_contrast_key, False
-            )
-
+    with st.expander("Chat tools", expanded=False):
         tools_col1, tools_col2, tools_col3 = st.columns(3)
         with tools_col1:
             probe_enabled = st.toggle(
-                "Probe tools",
+                "Probe",
                 key=probe_key,
-                help="Trace chat activations and run compatible `.pt` probes on tapped tokens.",
+                help="Color each assistant token by a loaded `.pt` probe's prediction.",
             )
         with tools_col2:
             compare_mode = st.toggle(
@@ -196,14 +194,14 @@ def render_advanced_settings(
                     "Available only in Compare mode."
                 ),
             )
-        st.session_state[last_compare_mode_key] = compare_mode
-        if last_probe_enabled_key:
-            st.session_state[last_probe_enabled_key] = probe_enabled
-        if last_token_contrast_key:
-            st.session_state[last_token_contrast_key] = token_contrast
 
-        st.divider()
-        st.caption("Generation")
+    st.session_state[last_compare_mode_key] = compare_mode
+    if last_probe_enabled_key:
+        st.session_state[last_probe_enabled_key] = probe_enabled
+    if last_token_contrast_key:
+        st.session_state[last_token_contrast_key] = token_contrast
+
+    with st.expander("Generation", expanded=False):
         generation = _render_generation_fragment(context_key, remote)
 
     tools = ChatTools(
@@ -332,11 +330,16 @@ def render_chat_message(
     if not message.get("content"):
         return
     contrast: TokenContrast | None = message.get("_contrast") if show_contrast else None
+    overlay = message.get("_probe_overlay")
     with st.chat_message(message["role"]):
         if contrast is not None:
             from utils.contrast import render_contrast_html
 
             st.html(render_contrast_html(contrast))
+        elif overlay is not None:
+            from utils.probe_overlay import render_probe_html
+
+            st.html(render_probe_html(overlay))
         else:
             st.markdown(message["content"])
 
