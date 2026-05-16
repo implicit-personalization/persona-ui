@@ -30,6 +30,8 @@ _SIDEBAR_REMOTE_MODEL_KEY = session_key("sidebar", "remote_model")
 _SIDEBAR_LOCAL_MODEL_KEY = session_key("sidebar", "local_model")
 _SIDEBAR_REMOTE_KEY = session_key("sidebar", "remote")
 _SIDEBAR_DATASET_SOURCE_KEY = session_key("sidebar", "dataset_source")
+_SIDEBAR_NDIF_API_KEY = session_key("sidebar", "ndif_api_key")
+NDIF_REGISTRATION_URL = "https://login.ndif.us/"
 
 
 _TABS = ["Chat", "Analysis", "Probing", "Extract"]
@@ -163,6 +165,25 @@ def _remote_model_input(remote_models: list[str]) -> str:
     return model_name
 
 
+def _ndif_api_key_input() -> None:
+    """Prompt for an NDIF API key when none is configured via the environment."""
+    import nnsight
+
+    if os.environ.get("NDIF_API_KEY") or nnsight.CONFIG.API.APIKEY:
+        return
+
+    api_key = st.text_input(
+        "NDIF API key",
+        type="password",
+        key=_SIDEBAR_NDIF_API_KEY,
+        help=f"Required for remote (NDIF) execution. Register at {NDIF_REGISTRATION_URL}",
+    )
+    if api_key:
+        nnsight.CONFIG.API.APIKEY = api_key
+    else:
+        st.caption(f"No NDIF API key found. [Get one]({NDIF_REGISTRATION_URL}).")
+
+
 def _sidebar_controls() -> SidebarState:
     with st.sidebar:
         st.markdown("## Persona UI")
@@ -200,6 +221,7 @@ def _sidebar_controls() -> SidebarState:
 
         st.divider()
         st.caption("Runtime")
+        _ndif_api_key_input()
         remote = st.toggle("Remote (NDIF)", value=False, key=_SIDEBAR_REMOTE_KEY)
 
         if remote:
