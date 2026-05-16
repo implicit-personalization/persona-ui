@@ -2,7 +2,17 @@
 
 import plotly.graph_objects as go
 import plotly.io as pio
+import streamlit as st
 from catppuccin import PALETTE
+
+
+def active_base() -> str:
+    """Return the live theme flavor ("light"/"dark").
+
+    Reflects the user's choice in Streamlit's built-in Settings-menu theme
+    toggle, falling back to the configured ``theme.base`` default.
+    """
+    return st.context.theme.type or st.get_option("theme.base")
 
 
 def _flavor(base: str | None):
@@ -17,8 +27,14 @@ def install_catppuccin_theme(base: str | None = None) -> None:
     per-figure code.
     """
     c = _flavor(base).colors
-    bg, surface, line = c.base.hex, c.surface0.hex, c.surface1.hex
-    text, subtext = c.text.hex, c.subtext1.hex
+    bg, text, subtext = c.base.hex, c.text.hex, c.subtext1.hex
+    if base == "light":
+        # Latte's surface0/1 are heavy grays; use lighter slots so the grid
+        # stays subtle, the legend isn't a gray block, and diverging plots
+        # fade through near-white instead of mud.
+        surface, line, mid = c.mantle.hex, c.surface0.hex, c.base.hex
+    else:
+        surface, line, mid = c.surface0.hex, c.surface1.hex, c.surface0.hex
 
     axis = dict(
         gridcolor=line,
@@ -61,7 +77,7 @@ def install_catppuccin_theme(base: str | None = None) -> None:
             scene=dict(xaxis=scene_axis, yaxis=scene_axis, zaxis=scene_axis),
             legend=dict(bgcolor=surface, bordercolor=line, font=dict(color=text)),
             colorscale=dict(
-                diverging=[[0.0, c.blue.hex], [0.5, surface], [1.0, c.red.hex]],
+                diverging=[[0.0, c.blue.hex], [0.5, mid], [1.0, c.red.hex]],
             ),
         )
     )

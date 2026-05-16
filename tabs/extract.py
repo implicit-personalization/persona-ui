@@ -14,7 +14,11 @@ from persona_vectors.extraction import (
 from persona_vectors.preview import TokenSegment, preview_token_segments
 
 from utils.controls import render_mask_strategy_select
-from utils.datasets import load_dataset, load_persona_list_from_dataset
+from utils.datasets import (
+    load_dataset,
+    load_persona_list_from_dataset,
+    warm_qa_in_background,
+)
 from utils.helpers import (
     NDIF_STATUS_ICONS,
     persona_label,
@@ -23,6 +27,7 @@ from utils.helpers import (
     widget_key,
 )
 from utils.runtime import cached_model
+from utils.theme import active_base
 
 _LAST_VARIANTS_KEY = "extract:last_variants"
 _LAST_BASELINE_KEY = "extract:last_include_baseline"
@@ -138,6 +143,10 @@ def _load_qa_dataset_personas(
             "Try another dataset source or check that the personas file is not empty."
         )
         return None
+
+    # Extract is the only tab that needs QA; warm it now so the parse overlaps
+    # with the user configuring the run instead of blocking the first extract.
+    warm_qa_in_background(dataset)
     return dataset, personas
 
 
@@ -171,7 +180,7 @@ _MAX_PREVIEW_SAMPLES = 3
 
 
 def _preview_palette():
-    flavor = PALETTE.latte if st.get_option("theme.base") == "light" else PALETTE.mocha
+    flavor = PALETTE.latte if active_base() == "light" else PALETTE.mocha
     return flavor.colors
 
 

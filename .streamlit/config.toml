@@ -1,9 +1,20 @@
-# Catppuccin Mocha theme. Switch base to "light" and swap the four colors
-# below to the Latte equivalents (see utils/theme.py) for the light flavor.
+# Catppuccin theme. `base` is the default flavor; the built-in Streamlit
+# Settings menu (Light / Dark / System) switches between the two variants
+# below. Latte = light, Mocha = dark. Keep in sync with utils/theme.py.
 [theme]
 base = "dark"
-primaryColor = "#89b4fa"          # Mocha blue
-backgroundColor = "#1e1e2e"       # base
-secondaryBackgroundColor = "#313244"  # surface0
-textColor = "#cdd6f4"             # text
 font = "sans serif"
+
+[theme.light]                              # Catppuccin Latte (style-guide mapping)
+primaryColor = "#8839ef"                   # mauve   - accent (Catppuccin default)
+backgroundColor = "#eff1f5"                # base    - background pane
+secondaryBackgroundColor = "#dce0e8"       # crust   - secondary panes
+textColor = "#4c4f69"                      # text    - body copy
+linkColor = "#1e66f5"                      # blue    - links/URLs
+borderColor = "#9ca0b0"                    # overlay0 - inactive border
+
+[theme.dark]                               # Catppuccin Mocha (unchanged)
+primaryColor = "#89b4fa"                   # blue
+backgroundColor = "#1e1e2e"                # base
+secondaryBackgroundColor = "#313244"       # surface0
+textColor = "#cdd6f4"                      # text

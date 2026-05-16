@@ -1,6 +1,7 @@
 import atexit
 import hashlib
 import shutil
+import threading
 from pathlib import Path
 from tempfile import mkdtemp
 from typing import Any
@@ -21,6 +22,30 @@ def _cached_dataset(cls: type) -> Any:
     """Instantiate and cache a HuggingFace dataset class once per session."""
 
     return cls()
+
+
+_qa_warm_lock = threading.Lock()
+
+
+def warm_qa_in_background(dataset: Any) -> None:
+    """Trigger the dataset's lazy QA parse on a daemon thread, once.
+
+    QA loading is deferred in persona-data (large, unused outside Extract).
+    Kicking it off when the Extract tab opens means the parse overlaps with
+    the user picking personas/options instead of blocking the first run.
+    Idempotent across Streamlit reruns: guarded per cached dataset instance.
+    """
+
+    warm = getattr(dataset, "_load_qa", None)
+    if warm is None:
+        return  # persona-only dataset (e.g. Nemotron) has no QA
+    with _qa_warm_lock:
+        if getattr(dataset, "_qa_warm_started", False):
+            return
+        dataset._qa_warm_started = True
+    threading.Thread(
+        target=warm, name="persona-ui-warm-qa", daemon=True
+    ).start()
 
 
 @st.cache_resource(show_spinner=False)

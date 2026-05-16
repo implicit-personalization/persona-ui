@@ -12,7 +12,7 @@ from utils.analysis_sources import (
 from utils.helpers import DATASET_SOURCES, session_key, widget_key
 from utils.preload import preload_once
 from utils.runtime import list_remote_models
-from utils.theme import install_catppuccin_theme
+from utils.theme import active_base, install_catppuccin_theme
 
 load_dotenv()
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "google/gemma-2-2b-it")
@@ -233,7 +233,7 @@ def main() -> None:
     """Run the Streamlit app."""
 
     st.set_page_config(page_title="Persona UI", layout="wide")
-    install_catppuccin_theme(st.get_option("theme.base"))
+    install_catppuccin_theme(active_base())
 
     sidebar = _sidebar_controls()
 

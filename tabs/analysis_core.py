@@ -58,7 +58,7 @@ from utils.helpers import (
     slugify,
     widget_key,
 )
-from utils.theme import style_plotly_layer_controls
+from utils.theme import active_base, style_plotly_layer_controls
 
 
 def _filename(*parts: str) -> str:
@@ -586,7 +586,7 @@ def _render_save_buttons(
 
 
 def _style_plotly_figures(figs: list[object]) -> None:
-    base = st.get_option("theme.base")
+    base = active_base()
     for fig in figs:
         if isinstance(fig, go.Figure):
             style_plotly_layer_controls(fig, base)

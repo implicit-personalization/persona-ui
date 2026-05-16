@@ -243,10 +243,24 @@ def render_contrast_html(result: TokenContrast) -> str:
     Render each token with a colored background reflecting how A- or B-specific
     it is, with a hover tooltip showing the raw Δlog P, plus a legend.
     """
+    # The model often opens a response with newline tokens; under pre-wrap
+    # those render as blank lines before the first word. Drop leading
+    # whitespace-only tokens (and left-trim the first visible one) so the
+    # contrast starts at real content. Display-only — weights stay aligned.
+    items = list(
+        zip(result.tokens, result.weights, result.raw_diffs, strict=True)
+    )
+    start = 0
+    while start < len(items) and not items[start][0].strip():
+        start += 1
+    if start >= len(items):
+        start = 0  # all-whitespace response: render as-is, not blank
+    items = items[start:]
+
     spans: list[str] = []
-    for token, weight, raw in zip(
-        result.tokens, result.weights, result.raw_diffs, strict=True
-    ):
+    for idx, (token, weight, raw) in enumerate(items):
+        if idx == 0:
+            token = token.lstrip()
         bg = _weight_to_bg(weight)
         tip = escape(f"Δlog P(A−B): {raw:+.3f}")
         text = escape(token)
