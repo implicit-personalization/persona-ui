@@ -36,7 +36,7 @@ def warm_qa_in_background(dataset: Any) -> None:
     Idempotent across Streamlit reruns: guarded per cached dataset instance.
     """
 
-    warm = getattr(dataset, "_load_qa", None)
+    warm = getattr(dataset, "prefetch_qa", None)
     if warm is None:
         return  # persona-only dataset (e.g. Nemotron) has no QA
     with _qa_warm_lock:
