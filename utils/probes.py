@@ -154,7 +154,9 @@ class LoadedProbe:
             probs = probs.unsqueeze(0)
 
         predicted_index = (
-            0 if probs.numel() == 1 else int(torch.argmax(probs).item())
+            int(probs.item() >= 0.5)
+            if probs.numel() == 1
+            else int(torch.argmax(probs).item())
         )
         predicted_label = (
             self.labels[predicted_index]
@@ -208,28 +210,27 @@ class LoadedProbe:
         return logits, probs
 
     def _normalize_batch(self, batch: torch.Tensor) -> torch.Tensor:
-        if self.scaler_mean is None or self.scaler_std is None:
-            return batch
-        mean = self.scaler_mean.to(dtype=torch.float32)
-        std = self.scaler_std.to(dtype=torch.float32)
-        if mean.ndim != 1 or std.ndim != 1 or mean.shape[0] != batch.shape[1]:
-            raise ValueError(
-                "Probe scaler shape does not match activation hidden size: "
-                f"mean={tuple(mean.shape)} std={tuple(std.shape)} "
-                f"batch={tuple(batch.shape)}"
-            )
-        safe_std = torch.where(std == 0, torch.ones_like(std), std)
-        batch = (batch - mean) / safe_std
-        if self.pca_mean is None or self.pca_components is None:
-            return batch
-        pca_mean = self.pca_mean.to(dtype=torch.float32)
-        components = self.pca_components.to(dtype=torch.float32)
-        if pca_mean.ndim != 1 or pca_mean.shape[0] != batch.shape[1]:
-            raise ValueError(
-                "Probe PCA mean shape does not match activation hidden size: "
-                f"mean={tuple(pca_mean.shape)} batch={tuple(batch.shape)}"
-            )
-        return (batch - pca_mean) @ components.T
+        if self.scaler_mean is not None and self.scaler_std is not None:
+            mean = self.scaler_mean.to(dtype=torch.float32)
+            std = self.scaler_std.to(dtype=torch.float32)
+            if mean.ndim != 1 or std.ndim != 1 or mean.shape[0] != batch.shape[1]:
+                raise ValueError(
+                    "Probe scaler shape does not match activation hidden size: "
+                    f"mean={tuple(mean.shape)} std={tuple(std.shape)} "
+                    f"batch={tuple(batch.shape)}"
+                )
+            safe_std = torch.where(std == 0, torch.ones_like(std), std)
+            batch = (batch - mean) / safe_std
+        if self.pca_mean is not None and self.pca_components is not None:
+            pca_mean = self.pca_mean.to(dtype=torch.float32)
+            components = self.pca_components.to(dtype=torch.float32)
+            if pca_mean.ndim != 1 or pca_mean.shape[0] != batch.shape[1]:
+                raise ValueError(
+                    "Probe PCA mean shape does not match activation hidden size: "
+                    f"mean={tuple(pca_mean.shape)} batch={tuple(batch.shape)}"
+                )
+            batch = (batch - pca_mean) @ components.T
+        return batch
 
 
 def model_probe_dir_name(model_name: str) -> str:

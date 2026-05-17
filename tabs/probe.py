@@ -322,8 +322,8 @@ def _cached_sweep(
     if inputs.n_pca_components is not None:
         # Always overlay the compressed sweep against full activations.
         rows_by_label = {
-            f"pca{inputs.n_pca_components}": _sweep(inputs.n_pca_components),
             "full": _sweep(None),
+            f"pca{inputs.n_pca_components}": _sweep(inputs.n_pca_components),
         }
     else:
         rows_by_label = {"full": _sweep(None)}

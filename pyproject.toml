@@ -15,6 +15,14 @@ dependencies = [
     "safetensors>=0.7.0",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 # Local development:
 # [tool.uv.sources]
 # persona-vectors = { path = "../persona-vectors", editable = true }
