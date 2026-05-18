@@ -11,14 +11,19 @@ from persona_vectors.plots import (
     build_layered_figure,
     build_pair_similarity_figure,
     build_similarity_figures,
-    prepare_layered_projection_data,
 )
 
 from utils.analysis_metadata import (
     synth_persona_attribute_names,
     synth_persona_dataset_cached,
 )
-from utils.analysis_sources import Store, store_id
+from utils.analysis_sources import (
+    Store,
+    kmeans_groups_cached,
+    projection_data_cached,
+    store_cache_parts,
+    store_id,
+)
 from utils.helpers import personas_fingerprint, prompt_variant_label, widget_key
 
 from tabs.analysis._shared import (
@@ -48,7 +53,7 @@ from tabs.analysis._state import (
     LayeredFigureStateKeys,
     ProjectionColorConfig,
     _clear_old_figure_states,
-    _clear_old_projection_states,
+    _clear_old_prepared_states,
     _highlight_persona_groups,
     _persona_display_label,
     _persona_names_state_key,
@@ -116,7 +121,7 @@ def _render_projection_color_config(
         key=color_mode_key,
         remember_key=_LAST_PROJECTION_COLOR_MODE_KEY,
         options=_PROJECTION_COLOR_MODES,
-        default="Persona",
+        default="Persona attribute",
     )
     if color_mode == "K-means clusters":
         max_clusters = min(10, len(persona_ids))
@@ -265,36 +270,34 @@ def _layered_figure_state_keys(
     )
     if figure_kind not in _PROJECTION_KINDS:
         return LayeredFigureStateKeys(figure=figure_key)
-
-    graph_overlay = figure_kind == "isomap"
-    projection_key = widget_key(
+    prepared_key = widget_key(
         "load",
-        f"{scope}_projection_state",
+        f"{scope}_projection_ready",
         store_id(store),
         store.model_name,
         mask_strategy.value,
         figure_kind,
         str(n_components),
-        str(graph_overlay),
+        str(figure_kind == "isomap"),
         str(_DEFAULT_GRAPH_NEIGHBORS),
         variant,
-        "persona_vector",
         persona_key,
         layer_key,
     )
-    return LayeredFigureStateKeys(figure=figure_key, projection=projection_key)
+    return LayeredFigureStateKeys(figure=figure_key, prepared=prepared_key)
 
 
 def _projection_build_kwargs(
-    samples,
     *,
+    store: Store,
+    mask_strategy: MaskStrategy,
+    variant: str,
     figure_kind: str,
     selected_layers: list[int],
     n_components: int,
     color_config: ProjectionColorConfig,
     persona_ids: list[str],
     persona_names: dict[str, str],
-    projection_key: str | None,
 ) -> dict:
     if figure_kind not in _PROJECTION_KINDS:
         return {}
@@ -305,22 +308,29 @@ def _projection_build_kwargs(
         "graph_overlay": graph_overlay,
         "graph_n_neighbors": _DEFAULT_GRAPH_NEIGHBORS,
     }
+    source, location, model_name = store_cache_parts(store)
+    cache_args = (
+        source,
+        location,
+        model_name,
+        mask_strategy.value,
+        variant,
+        tuple(persona_ids),
+        tuple(selected_layers),
+    )
+    build_kwargs["projection_data"] = projection_data_cached(
+        *cache_args,
+        figure_kind,
+        n_components,
+        graph_overlay,
+        _DEFAULT_GRAPH_NEIGHBORS,
+    )
     if color_config.n_clusters is not None:
-        build_kwargs["n_clusters"] = color_config.n_clusters
-        build_kwargs["cluster_mode"] = color_config.cluster_mode
-    if projection_key is not None:
-        projection_data = st.session_state.get(projection_key)
-        if projection_data is None:
-            projection_data = prepare_layered_projection_data(
-                samples,
-                figure_kind,
-                layers=selected_layers,
-                n_components=n_components,
-                graph_overlay=graph_overlay,
-                graph_n_neighbors=_DEFAULT_GRAPH_NEIGHBORS,
-            )
-            st.session_state[projection_key] = projection_data
-        build_kwargs["projection_data"] = projection_data
+        build_kwargs["groups"] = kmeans_groups_cached(
+            *cache_args,
+            color_config.n_clusters,
+            color_config.cluster_mode or "mean_across_layers",
+        )
     if color_config.attribute_name is not None:
         build_kwargs.update(
             attribute_color_kwargs(
@@ -487,8 +497,6 @@ def _render_layered_figure_analysis(
         selected_layers=selected_layers,
         pair_trajectories=pair_trajectories,
     )
-    if state_keys.projection is not None:
-        _clear_old_projection_states(state_keys.projection)
     filename = scope
     _clear_old_figure_states(state_keys.figure)
     persona_names = st.session_state.get(
@@ -496,7 +504,13 @@ def _render_layered_figure_analysis(
         {},
     )
 
-    if st.button(button_label, type="primary"):
+    build_clicked = st.button(button_label, type="primary")
+    recolor_from_warm_projection = (
+        state_keys.prepared is not None
+        and bool(st.session_state.get(state_keys.prepared))
+        and state_keys.figure not in st.session_state
+    )
+    if build_clicked or recolor_from_warm_projection:
         build_label = {
             "umap": "Computing UMAP projections…",
             "pca": "Computing PCA projections…",
@@ -514,14 +528,15 @@ def _render_layered_figure_analysis(
             )
             progress.progress(55, text=build_label)
             build_kwargs = _projection_build_kwargs(
-                samples,
+                store=store,
+                mask_strategy=mask_strategy,
+                variant=variant,
                 figure_kind=figure_kind,
                 selected_layers=selected_layers,
                 n_components=n_components,
                 color_config=color_config,
                 persona_ids=persona_ids,
                 persona_names=persona_names,
-                projection_key=state_keys.projection,
             )
             main_fig, extra_fig = _build_layered_analysis_figures(
                 samples,
@@ -541,12 +556,15 @@ def _render_layered_figure_analysis(
             n_samples = samples.vectors.shape[0]
             del samples
             _store_figure_state(state_keys.figure, (main_fig, extra_fig, n_samples))
+            if state_keys.prepared is not None:
+                _clear_old_prepared_states(state_keys.prepared)
+                st.session_state[state_keys.prepared] = True
             progress.progress(100, text="Done.")
         except Exception as exc:
             st.error(f"Could not build figure: {exc}")
             st.session_state.pop(state_keys.figure, None)
         finally:
-            _release_vector_memory(store, [variant])
+            _release_vector_memory()
             progress.empty()
 
     if state_keys.figure in st.session_state:

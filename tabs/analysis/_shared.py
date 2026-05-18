@@ -6,22 +6,6 @@ from persona_data.synth_persona import BASELINE_PERSONA_ID
 from persona_vectors.extraction import MaskStrategy
 from persona_vectors.plots import save_plot_html
 
-from utils.analysis_sources import (
-    Store,
-    available_variants,
-    load_persona_vectors_cached,
-    load_variant_vectors_cached,
-    persona_names_cached,
-    personas_cached,
-    release_hf_store_cache,
-    store_cache_parts,
-    store_id,
-    store_layers_cached,
-)
-from utils.controls import render_mask_strategy_select
-from utils.helpers import personas_fingerprint, prompt_variant_label, widget_key
-from utils.theme import active_base, style_plotly_layer_controls
-
 from tabs.analysis._state import (
     _DEFAULT_LAYER_FRAMES,
     _HIGHLIGHT_OTHER_COLOR,
@@ -35,6 +19,20 @@ from tabs.analysis._state import (
     _remembered_selectbox,
     _sequence_to_list,
 )
+from utils.analysis_sources import (
+    Store,
+    available_variants,
+    load_persona_vectors_cached,
+    load_variant_vectors_cached,
+    persona_names_cached,
+    personas_cached,
+    store_cache_parts,
+    store_id,
+    store_layers_cached,
+)
+from utils.controls import render_mask_strategy_select
+from utils.helpers import personas_fingerprint, prompt_variant_label, widget_key
+from utils.theme import active_base, style_plotly_layer_controls
 
 
 def _gray_out_unselected_personas(fig: go.Figure) -> None:
@@ -118,8 +116,7 @@ def _load_variant_vectors(
     )
 
 
-def _release_vector_memory(store: Store, variants: list[str] | tuple[str, ...]) -> None:
-    release_hf_store_cache(store, variants)
+def _release_vector_memory() -> None:
     gc.collect()
 
 

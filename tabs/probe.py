@@ -23,6 +23,7 @@ from persona_vectors.plots import plot_metric_comparison, plot_metric_over_layer
 from persona_vectors.probes import (
     AttributeLabels,
     attribute_probe_labels,
+    default_probe_kinds,
     filter_attribute_samples_min_count,
     infer_probe_task,
     layer_matrix,
@@ -85,8 +86,9 @@ class _SweepInputs:
     mask_value: str
     variant: str
     persona_ids: tuple[str, ...]
-    attribute: str
+    attributes: tuple[str, ...]
     task: str
+    probe_kinds: tuple[str, ...]
     n_pca_components: int | None
     layers: tuple[int, ...]
     min_class_count: int
@@ -234,20 +236,60 @@ def _select_personas(
 # ---------------------------------------------------------------------------
 
 
-def _select_attribute() -> str:
+@st.cache_data(show_spinner=False)
+def _attribute_tasks() -> dict[str, str]:
     dataset = synth_persona_dataset_cached()
-    options = list(synth_persona_attribute_names())
-    if "sex" in options:
-        default_index = options.index("sex")
+    return {
+        name: infer_probe_task(dataset, name)
+        for name in synth_persona_attribute_names()
+    }
+
+
+def _select_attributes() -> list[str]:
+    """Multi-select locked to one task type.
+
+    Picking the first attribute fixes the task; only same-task attributes stay
+    selectable. Clearing the selection reopens every attribute again.
+    """
+    dataset = synth_persona_dataset_cached()
+    tasks = _attribute_tasks()
+    all_names = list(synth_persona_attribute_names())
+
+    key = "probe:attributes"
+    if key not in st.session_state:
+        st.session_state[key] = ["sex"] if "sex" in all_names else all_names[:1]
+
+    selected = st.session_state[key]
+    if selected:
+        locked = tasks[selected[0]]
+        options = [name for name in all_names if tasks[name] == locked]
     else:
-        default_index = 0
-    return st.selectbox(
-        "Attribute to probe",
+        options = all_names
+
+    return st.multiselect(
+        "Attributes to probe",
         options=options,
-        index=default_index,
         format_func=lambda name: attribute_display_label(dataset, name),
-        key="probe:attribute",
+        key=key,
+        help="Pick one or more attributes of the same task type. They are "
+        "overlaid in one figure. Remove all to switch to a different task type.",
     )
+
+
+def _select_probe_kinds(task: str) -> list[str]:
+    """Pick which probe families to fit. Only shown when the task has >1."""
+    available = list(default_probe_kinds(task))  # type: ignore[arg-type]
+    if len(available) < 2:
+        return available
+    selected = st.multiselect(
+        "Probe kinds to fit",
+        options=available,
+        default=available,
+        key=f"probe:kinds:{task}",
+        help="Which probe families to fit at each layer. Defaults to all "
+        "available for this task.",
+    )
+    return selected or available
 
 
 def _select_pca_components() -> int | None:
@@ -298,61 +340,78 @@ def _select_layers(num_layers: int) -> list[int]:
 @st.cache_resource(show_spinner=False)
 def _cached_sweep(
     inputs: _SweepInputs,
-) -> tuple[dict[str, list[dict[str, object]]], AttributeLabels, LayeredSamples]:
+) -> tuple[
+    dict[str, list[dict[str, object]]],
+    dict[str, tuple[AttributeLabels, LayeredSamples]],
+]:
     samples = load_persona_vectors_cached(
         inputs.source, inputs.location, inputs.model_name,
         inputs.mask_value, inputs.variant, inputs.persona_ids,
     )
     dataset = synth_persona_dataset_cached()
-    labels = attribute_probe_labels(
-        dataset, inputs.attribute, list(inputs.persona_ids), task=inputs.task,  # type: ignore[arg-type]
-    )
-    probe_samples, labels = filter_attribute_samples_min_count(
-        samples, labels, min_count=inputs.min_class_count
-    )
+    # The min-count filter drops personas per attribute, so each attribute keeps
+    # its own (labels, samples) pair for the downstream selectivity/save tools.
+    per_attr: dict[str, tuple[AttributeLabels, LayeredSamples]] = {}
 
-    def _sweep(n_pca: int | None) -> list[dict[str, object]]:
+    def _labels_and_samples(attribute: str) -> tuple[AttributeLabels, LayeredSamples]:
+        if attribute not in per_attr:
+            labels = attribute_probe_labels(
+                dataset, attribute, list(inputs.persona_ids), task=inputs.task,  # type: ignore[arg-type]
+            )
+            probe_samples, labels = filter_attribute_samples_min_count(
+                samples, labels, min_count=inputs.min_class_count
+            )
+            per_attr[attribute] = (labels, probe_samples)
+        return per_attr[attribute]
+
+    def _sweep(attribute: str, n_pca: int | None) -> list[dict[str, object]]:
+        labels, probe_samples = _labels_and_samples(attribute)
         return sweep_attribute(
             probe_samples, labels,
             layers=list(inputs.layers),
+            probe_kinds=list(inputs.probe_kinds),  # type: ignore[arg-type]
             n_pca_components=n_pca,
             seed=inputs.seed,
         )
 
+    def _sweep_all(n_pca: int | None) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for attribute in inputs.attributes:
+            rows.extend(_sweep(attribute, n_pca))
+        return rows
+
     if inputs.n_pca_components is not None:
         # Always overlay the compressed sweep against full activations.
         rows_by_label = {
-            "full": _sweep(None),
-            f"pca{inputs.n_pca_components}": _sweep(inputs.n_pca_components),
+            "full": _sweep_all(None),
+            f"pca{inputs.n_pca_components}": _sweep_all(inputs.n_pca_components),
         }
     else:
-        rows_by_label = {"full": _sweep(None)}
-    return rows_by_label, labels, probe_samples
+        rows_by_label = {"full": _sweep_all(None)}
+    return rows_by_label, per_attr
 
 
 def _show_sweep(
     rows_by_label: dict[str, list[dict[str, object]]],
-    labels: AttributeLabels,
-    samples: LayeredSamples,
-    attribute: str,
+    per_attr: dict[str, tuple[AttributeLabels, LayeredSamples]],
+    attributes: tuple[str, ...],
     task: str,
     inputs: _SweepInputs,
 ) -> None:
     primary = _PRIMARY_METRIC[task]
     secondary = _SECONDARY_METRIC.get(task)
 
-    # Tolerate stale session state from a previous code version (bare rows).
-    if isinstance(rows_by_label, list):
-        rows_by_label = {"full": rows_by_label}
     primary_label = (
         f"pca{inputs.n_pca_components}" if inputs.n_pca_components else "full"
     )
     rows = rows_by_label.get(primary_label) or next(iter(rows_by_label.values()))
 
     def _plot(metric: str):
-        if len(rows_by_label) > 1:
-            return plot_metric_comparison(rows_by_label, attribute, metric=metric)
-        return plot_metric_over_layers(rows, attribute, metric=metric)
+        if len(rows_by_label) > 1 or len(attributes) > 1:
+            return plot_metric_comparison(
+                rows_by_label, list(attributes), metric=metric
+            )
+        return plot_metric_over_layers(rows, attributes[0], metric=metric)
 
     st.plotly_chart(_plot(primary), width="stretch")
     if secondary is not None:
@@ -377,21 +436,31 @@ def _show_sweep(
     if best is None:
         return
 
-    if len(rows_by_label) > 1:
+    multi_attr = len(attributes) > 1
+    if len(rows_by_label) > 1 or multi_attr:
         summary_rows = []
         for label, label_rows in rows_by_label.items():
-            label_best = _best_row(label_rows)
-            if label_best is None:
-                continue
-            summary_rows.append({
-                "features": label,
-                "best_layer": label_best["layer"],
-                "probe": label_best["probe_kind"],
-                primary: round(float(label_best[primary]), 3),
-                f"baseline_{primary}": round(
-                    float(label_best.get(f"baseline_{primary}", float("nan"))), 3
-                ),
-            })
+            for attribute in attributes:
+                attr_rows = [
+                    row for row in label_rows
+                    if row.get("attribute") == attribute
+                ]
+                label_best = _best_row(attr_rows)
+                if label_best is None:
+                    continue
+                summary_row: dict[str, object] = {}
+                if multi_attr:
+                    summary_row["attribute"] = attribute
+                summary_row.update({
+                    "features": label,
+                    "best_layer": label_best["layer"],
+                    "probe": label_best["probe_kind"],
+                    primary: round(float(label_best[primary]), 3),
+                    f"baseline_{primary}": round(
+                        float(label_best.get(f"baseline_{primary}", float("nan"))), 3
+                    ),
+                })
+                summary_rows.append(summary_row)
         if summary_rows:
             st.dataframe(summary_rows, width="stretch", hide_index=True)
 
@@ -399,18 +468,26 @@ def _show_sweep(
         f" · pca{inputs.n_pca_components}" if inputs.n_pca_components else ""
     )
 
-    cols = st.columns([1, 1.2, 1.8])
-    cols[0].metric("Best layer", best["layer"])
-    cols[1].metric(
-        f"Best {primary}",
-        f"{best[primary]:.3f}",
-        delta=f"baseline {best.get(f'baseline_{primary}', float('nan')):.3f}",
-        delta_color="off",
-    )
-    cols[2].metric("Probe", f"{best['probe_kind']}{feature_desc}")
+    best_attr = str(best["attribute"])
+    labels, samples = per_attr[best_attr]
+    if multi_attr:
+        # The per-attribute summary table above already covers every result;
+        # a single "best" card would only show one attribute, so skip it and
+        # just say which one the controls below operate on.
+        st.caption(f"Controls below use the best result: **{best_attr}**.")
+    else:
+        cols = st.columns([1, 1.2, 1.8])
+        cols[0].metric("Best layer", best["layer"])
+        cols[1].metric(
+            f"Best {primary}",
+            f"{best[primary]:.3f}",
+            delta=f"baseline {best.get(f'baseline_{primary}', float('nan')):.3f}",
+            delta_color="off",
+        )
+        cols[2].metric("Probe", f"{best['probe_kind']}{feature_desc}")
 
     _render_selectivity_control(best, labels, samples, task, inputs)
-    _render_save_artifact(best, labels, samples, attribute, task, inputs)
+    _render_save_artifact(best, labels, samples, task, inputs)
 
 
 def _render_selectivity_control(
@@ -461,7 +538,6 @@ def _render_save_artifact(
     best: dict[str, object],
     labels: AttributeLabels,
     samples: LayeredSamples,
-    attribute: str,
     task: str,
     inputs: _SweepInputs,
 ) -> None:
@@ -540,12 +616,15 @@ def render_probing_tab() -> None:
         if not persona_ids:
             return
 
-    dataset = synth_persona_dataset_cached()
     with st.expander("Probe configuration", expanded=True):
-        attribute = _select_attribute()
-        task = infer_probe_task(dataset, attribute)
+        attributes = _select_attributes()
+        if not attributes:
+            st.info("Select at least one attribute to probe.")
+            return
+        task = _attribute_tasks()[attributes[0]]
         st.caption(f"Inferred task: **{task}**")
 
+        probe_kinds = _select_probe_kinds(task)
         n_pca_components = _select_pca_components()
 
         source, location, model_name = store_cache_parts(store)
@@ -563,17 +642,13 @@ def render_probing_tab() -> None:
         num_layers = max(available_layers) + 1
         layers = _select_layers(num_layers)
         min_class_count = _MIN_CLASS_COUNT
-        seed = st.number_input(
-            "Seed", min_value=0, max_value=10_000, value=0, step=1,
-            key="probe:seed",
-            help="Seeds the probe/PCA fit. The 80/20 split itself is fixed "
-            "(random_state=0).",
-        )
+        seed = 0
 
     inputs = _SweepInputs(
         source=source, location=location, model_name=model_name,
         mask_value=mask_strategy.value, variant=variant,
-        persona_ids=tuple(persona_ids), attribute=attribute, task=task,
+        persona_ids=tuple(persona_ids), attributes=tuple(attributes), task=task,
+        probe_kinds=tuple(probe_kinds),
         n_pca_components=n_pca_components,
         layers=tuple(layers), min_class_count=min_class_count,
         seed=int(seed),
@@ -584,25 +659,21 @@ def render_probing_tab() -> None:
     if run:
         with st.spinner("Evaluating probes across layers..."):
             try:
-                sweep, labels, probe_samples = _cached_sweep(inputs)
+                sweep, per_attr = _cached_sweep(inputs)
             except Exception as exc:
                 st.error(f"Sweep failed: {exc}")
                 st.session_state.pop(state_key, None)
                 return
-        st.session_state[state_key] = (
-            sweep,
-            labels,
-            probe_samples,
-            attribute,
-            task,
-            inputs,
-        )
+        st.session_state[state_key] = (sweep, per_attr, inputs)
 
     if state_key in st.session_state:
         saved_result = st.session_state[state_key]
-        if len(saved_result) == 5:
-            sweep, labels, probe_samples, last_attr, last_task = saved_result
-            result_inputs = inputs
+        if len(saved_result) != 3:
+            # Stale shape from a previous code version — drop it.
+            st.session_state.pop(state_key, None)
         else:
-            sweep, labels, probe_samples, last_attr, last_task, result_inputs = saved_result
-        _show_sweep(sweep, labels, probe_samples, last_attr, last_task, result_inputs)
+            sweep, per_attr, result_inputs = saved_result
+            _show_sweep(
+                sweep, per_attr, result_inputs.attributes,
+                result_inputs.task, result_inputs,
+            )

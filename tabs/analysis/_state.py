@@ -45,7 +45,7 @@ _CLUSTER_MODES = {
     "First selected layer": "first_layer",
     "Per layer": "per_layer",
 }
-_PROJECTION_COLOR_MODES = ["Persona", "K-means clusters", "Persona attribute"]
+_PROJECTION_COLOR_MODES = ["Persona attribute", "Persona", "K-means clusters"]
 _MAX_ATTRIBUTE_CATEGORIES = DEFAULT_MAX_ATTRIBUTE_CATEGORIES
 
 
@@ -87,7 +87,7 @@ class ProjectionColorConfig:
 @dataclass(frozen=True)
 class LayeredFigureStateKeys:
     figure: str
-    projection: str | None = None
+    prepared: str | None = None
 
 
 _HIGHLIGHT_OTHER_LABEL = "Other"
@@ -139,7 +139,7 @@ _TRACKED_STATE_KEYS_KEY = "analysis:_tracked_state_keys"
 
 
 def _clear_old_load_states(current_key: str, suffix: str) -> None:
-    # Only one heavy figure/projection state should live at a time. We track
+    # Only one heavy figure state should live at a time. We track
     # the keys we create per suffix so eviction is O(1) instead of scanning
     # all of session_state on every rerun. Every such key is passed through
     # this function before it is set, so the registry stays authoritative.
@@ -156,8 +156,8 @@ def _clear_old_figure_states(current_key: str) -> None:
     _clear_old_load_states(current_key, "_fig_state")
 
 
-def _clear_old_projection_states(current_key: str) -> None:
-    _clear_old_load_states(current_key, "_projection_state")
+def _clear_old_prepared_states(current_key: str) -> None:
+    _clear_old_load_states(current_key, "_projection_ready")
 
 
 def _store_figure_state(key: str, value: object) -> None:

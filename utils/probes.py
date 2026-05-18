@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import json
 import os
 import re
 from dataclasses import dataclass
@@ -12,6 +11,7 @@ import streamlit as st
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from persona_vectors.probes import ProbeArtifact, load_probe_artifact
 
 PROBE_FILENAME_RE = re.compile(
     r"^cognitive_map_probe_layer(?P<layer>\d+)_(?P<model_type>[a-z0-9]+)_"
@@ -457,14 +457,19 @@ def _load_persona_probe_artifact(
     metadata_path: Path,
     weights_path: Path,
 ) -> LoadedProbe:
-    if not metadata_path.is_file():
-        raise FileNotFoundError(f"Missing probe metadata file: {metadata_path}")
-    if not weights_path.is_file():
-        raise FileNotFoundError(f"Missing probe weights file: {weights_path}")
-    from safetensors.torch import load_file
+    if metadata_path.parent != weights_path.parent:
+        raise ValueError("Canonical probe files must share one artifact directory.")
+    artifact = load_probe_artifact(metadata_path)
+    return _loaded_probe_from_artifact(filename=filename, artifact=artifact)
 
-    metadata = json.loads(metadata_path.read_text())
-    tensors = load_file(str(weights_path), device="cpu")
+
+def _loaded_probe_from_artifact(
+    *,
+    filename: str,
+    artifact: ProbeArtifact,
+) -> LoadedProbe:
+    metadata = artifact.metadata
+    tensors = artifact.tensors
     payload = {
         **metadata,
         "model_type": "linear",

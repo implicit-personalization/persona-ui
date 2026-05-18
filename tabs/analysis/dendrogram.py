@@ -13,7 +13,7 @@ from utils.helpers import personas_fingerprint, prompt_variant_label, widget_key
 
 from tabs.analysis._shared import (
     _load_persona_options,
-    _load_persona_vectors,
+    _load_variant_vectors,
     _plotly_chart,
     _release_vector_memory,
     _render_layer_frame_controls,
@@ -204,13 +204,14 @@ def _render_dendrogram_analysis(
     ):
         progress = st.progress(0, text="Loading first variant vectors…")
         try:
-            progress.progress(15, text="Loading first variant vectors…")
-            samples_a = _load_persona_vectors(
+            progress.progress(15, text="Loading variant vectors…")
+            by_variant = _load_variant_vectors(
                 store,
-                variant_a,
+                shared_variants,
                 mask_strategy,
                 persona_ids,
             )
+            samples_a = by_variant[variant_a]
             progress.progress(40, text="Building first dendrogram…")
             fig_a = plot_persona_dendrogram(
                 samples_a,
@@ -223,13 +224,8 @@ def _render_dendrogram_analysis(
             del samples_a
             fig_b = None
             if variant_a != variant_b:
-                progress.progress(60, text="Loading second variant vectors…")
-                samples_b = _load_persona_vectors(
-                    store,
-                    variant_b,
-                    mask_strategy,
-                    persona_ids,
-                )
+                progress.progress(60, text="Building second dendrogram…")
+                samples_b = by_variant[variant_b]
                 progress.progress(75, text="Building second dendrogram…")
                 fig_b = plot_persona_dendrogram(
                     samples_b,
@@ -250,7 +246,7 @@ def _render_dendrogram_analysis(
             st.error(f"Could not build dendrogram: {exc}")
             st.session_state.pop(fig_key, None)
         finally:
-            _release_vector_memory(store, shared_variants)
+            _release_vector_memory()
             progress.empty()
 
     if fig_key in st.session_state:

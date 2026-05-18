@@ -78,22 +78,15 @@ def _build_cosine_figures(
     mask_strategy: MaskStrategy,
     selection: CosineSelection,
 ) -> tuple[object, object | None, int, int] | None:
-    variant_sample_cache: dict[str, object] = {}
-
-    def _load_variant(variant: str):
-        if variant not in variant_sample_cache:
-            samples = _load_variant_vectors(
-                store,
-                [variant],
-                mask_strategy,
-                persona_ids=selection.persona_ids,
-            )
-            variant_sample_cache[variant] = samples[variant]
-        return variant_sample_cache[variant]
-
     try:
-        samples_a = _load_variant(selection.variant_a)
-        samples_b = _load_variant(selection.variant_b)
+        by_variant = _load_variant_vectors(
+            store,
+            selection.variants,
+            mask_strategy,
+            persona_ids=selection.persona_ids,
+        )
+        samples_a = by_variant[selection.variant_a]
+        samples_b = by_variant[selection.variant_b]
     except Exception as exc:
         st.error(f"Could not load vectors: {exc}")
         return None
@@ -120,8 +113,8 @@ def _build_cosine_figures(
     pair_errors = []
     for left, right in combinations(selection.variants, 2):
         try:
-            left_samples = _load_variant(left)
-            right_samples = _load_variant(right)
+            left_samples = by_variant[left]
+            right_samples = by_variant[right]
             pair_traces.append(
                 (
                     f"{prompt_variant_label(left)} vs {prompt_variant_label(right)}",
@@ -207,7 +200,7 @@ def _render_cosine_similarity(
             _store_figure_state(cosine_fig_key, figures)
             progress.progress(100, text="Done.")
         finally:
-            _release_vector_memory(store, selection.variants)
+            _release_vector_memory()
             progress.empty()
 
     if cosine_fig_key in st.session_state:

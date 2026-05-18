@@ -1608,7 +1608,7 @@ requires-dist = [
     { name = "catppuccin", specifier = ">=2.5.0" },
     { name = "datasets", specifier = ">=4.8.5" },
     { name = "huggingface-hub", specifier = ">=1.14.0" },
-    { name = "persona-vectors", specifier = ">=0.8.2" },
+    { name = "persona-vectors", specifier = ">=0.8.3" },
     { name = "plotly", specifier = ">=6.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "safetensors", specifier = ">=0.7.0" },
@@ -1620,7 +1620,7 @@ dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "persona-vectors"
-version = "0.8.2"
+version = "0.8.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "datasets" },
@@ -1639,9 +1639,9 @@ dependencies = [
     { name = "transformers" },
     { name = "umap-learn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ef/f4/66d2a1e30ed814a1ea945e27e2f9241cd7374872575e4d4c9e602a92a1cc/persona_vectors-0.8.2.tar.gz", hash = "sha256:f5b0776f8adbdfd38b9ad0f097daf88abb4c5dc504b3d3620af3f392e4a4621d", size = 42138, upload-time = "2026-05-16T22:11:53.019Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/1d/472284f43e2a276a035e9e3de08a92654945193699598def6d6a2aa74c96/persona_vectors-0.8.3.tar.gz", hash = "sha256:f0519846b3712865bd2562cd239df05ddd006ac3d1e73e5ec5a6c860aaed5b2e", size = 43146, upload-time = "2026-05-17T12:43:13.601Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/02/7af86ed4040c4f866705a7ec28b50ebaa570502c3b74465fd9282856b2b7/persona_vectors-0.8.2-py3-none-any.whl", hash = "sha256:6bfa374e86d5cefc009cea07a8b43cc98d710e508d8f3e3394c24483d342799b", size = 52033, upload-time = "2026-05-16T22:11:54.128Z" },
+    { url = "https://files.pythonhosted.org/packages/60/d1/a38dc354718310122cd5d3de63e3aa9060490c8db4c2eadb1d4985684796/persona_vectors-0.8.3-py3-none-any.whl", hash = "sha256:2feeaf45b071ed417d88add48a1012455c8027e4f839e99658a9808c26786b8a", size = 53129, upload-time = "2026-05-17T12:43:12.693Z" },
 ]
 
 [[package]]

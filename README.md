@@ -116,6 +116,8 @@ NDIF_API_KEY=...       # Required for remote (NDIF) model execution
 HF_HOME=...            # Optional: HuggingFace cache directory
 ARTIFACTS_DIR=...      # Optional: where persona vectors are read from (default: ./artifacts)
 PERSONA_VECTORS_HUB_REPO=...  # Optional: default Analysis/Probing Hub dataset repo
+PERSONA_UI_VECTOR_CACHE_ENTRIES=4     # Optional: loaded analysis datasets kept warm
+PERSONA_UI_PREPARED_CACHE_ENTRIES=8   # Optional: prepared projections / k-means groups kept warm
 ```
 
 The app picks up this file automatically via `load_dotenv()` on startup.
@@ -148,3 +150,7 @@ the Analysis/Probing tab's Local source path) at the tree you want to load.
 
 The store classes are `PersonaVectorStore` (local) and `HFPersonaVectorStore`
 (Hub) — same API, both imported by `utils/analysis_sources.py`.
+
+## Analysis responsiveness
+
+The Analysis tab keeps a small bounded cache of loaded vector datasets and prepared projection data. Once a projection has been computed, recoloring it by persona, attribute, or k-means group reuses the same coordinates; nearby Hub interactions also keep metadata warm instead of re-scanning after every figure. Tune `PERSONA_UI_VECTOR_CACHE_ENTRIES` if RAM is tight or you regularly switch among many selections, and `PERSONA_UI_PREPARED_CACHE_ENTRIES` if you revisit several projection configurations in one session.

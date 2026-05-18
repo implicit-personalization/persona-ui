@@ -12,9 +12,11 @@ two correctness fixes:
 import pytest
 import torch
 
+from persona_vectors.probes import ProbeArtifact
 from utils.probes import (
     LoadedProbe,
     _LinearProbe,
+    _loaded_probe_from_artifact,
     _normalize_labels,
     parse_probe_filename,
 )
@@ -196,3 +198,33 @@ def test_run_single_output_predicts_negative_when_score_low():
     result = probe.run(torch.tensor([1.0, 1.0]))
     assert result.predicted_index == 0
     assert result.predicted_label == "neg"
+
+
+# --------------------------------------------------------------------------- #
+# canonical persona-vectors artifacts
+# --------------------------------------------------------------------------- #
+
+
+def test_loaded_probe_from_canonical_artifact():
+    artifact = ProbeArtifact(
+        metadata={
+            "schema_version": 2,
+            "input_dim": 2,
+            "artifact_feature_dim": 2,
+            "class_names": ["neg", "pos"],
+            "task": "binary",
+            "probe_kind": "logistic_regression",
+            "layer": 3,
+        },
+        tensors={
+            "weight": torch.tensor([[-1.0, 0.0], [1.0, 0.0]]),
+            "bias": torch.zeros(2),
+        },
+    )
+    probe = _loaded_probe_from_artifact(
+        filename="m/answer_mean/templated/sex/logistic_regression_layer3/probe.json",
+        artifact=artifact,
+    )
+    assert probe.labels == ["neg", "pos"]
+    assert probe.layer == 3
+    assert probe.run(torch.tensor([1.0, 0.0])).predicted_label == "pos"
