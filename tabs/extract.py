@@ -26,7 +26,7 @@ from utils.helpers import (
     session_key,
     widget_key,
 )
-from utils.runtime import cached_model
+from utils.runtime import cached_model, remote_backend, session_ndif_api_key
 from utils.theme import active_base
 
 _LAST_VARIANTS_KEY = "extract:last_variants"
@@ -366,16 +366,28 @@ def _run_extraction_plan(
                 step / total_steps if total_steps else 1.0,
                 text=f"{_row_label(persona, variant)} ({step + 1}/{total_steps})",
             )
+            selected_qa = qa_pairs[: settings.max_questions]
             results.extend(
                 run_extraction(
                     model=model,
                     model_name=model_name,
-                    qa_pairs=qa_pairs[: settings.max_questions],
+                    qa_pairs=selected_qa,
                     variants=(variant,),
                     persona=persona,
                     mask_strategy=settings.mask_strategy,
                     remote=remote,
                     on_status=_on_ndif_status if remote else None,
+                    backend_factory=(
+                        (
+                            lambda: remote_backend(
+                                model,
+                                session_ndif_api_key(),
+                                on_status=_on_ndif_status,
+                            )
+                        )
+                        if remote
+                        else None
+                    ),
                 )
             )
 

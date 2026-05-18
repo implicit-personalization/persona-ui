@@ -1,4 +1,5 @@
 import os
+from contextlib import contextmanager
 
 import streamlit as st
 from persona_vectors.analysis import (
@@ -39,6 +40,34 @@ _VECTOR_CACHE_ENTRIES = env_int("PERSONA_UI_VECTOR_CACHE_ENTRIES", 4)
 _PREPARED_CACHE_ENTRIES = env_int("PERSONA_UI_PREPARED_CACHE_ENTRIES", 8)
 
 
+def _hub_variants_pending(store: Store, variants: tuple[str, ...]) -> tuple[str, ...]:
+    """Return Hub variants that have not yet been opened by this store instance."""
+
+    if not isinstance(store, HFPersonaVectorStore):
+        return ()
+    return tuple(variant for variant in variants if variant not in store._datasets)
+
+
+@contextmanager
+def _hub_vector_notice(store: Store, variants: tuple[str, ...]):
+    """Show a transient, honest cold-load note for Hub-backed vector data."""
+
+    pending = _hub_variants_pending(store, variants)
+    if not pending:
+        yield
+        return
+
+    notice = st.empty()
+    notice.warning(
+        "Loading persona vectors from Hugging Face. "
+        "On a cold cache, this may download Hub dataset files."
+    )
+    try:
+        yield
+    finally:
+        notice.empty()
+
+
 @st.cache_resource(show_spinner=False, max_entries=_STORE_CACHE_ENTRIES)
 def activation_store_cached(
     source: str,
@@ -74,9 +103,9 @@ def personas_cached(
     *,
     include_baseline: bool = False,
 ) -> list[str]:
-    return activation_store_cached(
-        source, location, model_name, mask_strategy_value
-    ).list_personas(list(variants), include_baseline=include_baseline)
+    store = activation_store_cached(source, location, model_name, mask_strategy_value)
+    with _hub_vector_notice(store, variants):
+        return store.list_personas(list(variants), include_baseline=include_baseline)
 
 
 @st.cache_data(show_spinner=False)
@@ -89,7 +118,8 @@ def persona_names_cached(
     persona_ids: tuple[str, ...],
 ) -> dict[str, str]:
     store = activation_store_cached(source, location, model_name, mask_strategy_value)
-    names = store.persona_names(list(persona_ids), variants=list(variants))
+    with _hub_vector_notice(store, variants):
+        names = store.persona_names(list(persona_ids), variants=list(variants))
     # Preserve input order, fall back to the id when the row has no display name.
     return {pid: names.get(pid, pid) for pid in persona_ids}
 
@@ -103,9 +133,9 @@ def store_layers_cached(
     variants: tuple[str, ...],
     persona_ids: tuple[str, ...],
 ) -> list[int]:
-    return activation_store_cached(
-        source, location, model_name, mask_strategy_value
-    ).list_layers(list(variants), list(persona_ids))
+    store = activation_store_cached(source, location, model_name, mask_strategy_value)
+    with _hub_vector_notice(store, variants):
+        return store.list_layers(list(variants), list(persona_ids))
 
 
 @st.cache_data(show_spinner=False)
@@ -156,12 +186,13 @@ def load_analysis_dataset_cached(
     persona_ids: tuple[str, ...],
 ) -> AnalysisDataset:
     store = activation_store_cached(source, location, model_name, mask_strategy_value)
-    return load_analysis_dataset(
-        store,
-        variants,
-        mask_strategy=MaskStrategy(mask_strategy_value),
-        persona_ids=persona_ids,
-    )
+    with _hub_vector_notice(store, variants):
+        return load_analysis_dataset(
+            store,
+            variants,
+            mask_strategy=MaskStrategy(mask_strategy_value),
+            persona_ids=persona_ids,
+        )
 
 
 def load_persona_vectors_cached(

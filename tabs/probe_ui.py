@@ -28,7 +28,7 @@ from utils.probes import (
     load_probe,
     load_probe_from_bytes,
 )
-from utils.runtime import cached_model
+from utils.runtime import cached_model, session_ndif_api_key
 from utils.selection_controls import remembered_segmented_control
 
 _LAST_SOURCE_KEY = session_key("probe", "last_source")
@@ -428,6 +428,7 @@ def render_probe_inspector(
                     layer=layer,
                     location=location,
                     remote=remote,
+                    ndif_api_key=session_ndif_api_key(),
                 )
             except Exception as exc:
                 _reset()

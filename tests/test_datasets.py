@@ -11,8 +11,20 @@ class _Progress:
         self.updates.append((value, text))
 
 
+class _Notice:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+        self.empty_calls = 0
+
+    def warning(self, message: str) -> None:
+        self.messages.append(message)
+
+    def empty(self) -> None:
+        self.empty_calls += 1
+
+
 def test_download_missing_startup_files_only_fetches_uncached_files(monkeypatch):
-    warnings: list[str] = []
+    notice = _Notice()
     progress = _Progress()
     downloads: list[tuple[str, str, str]] = []
 
@@ -21,7 +33,7 @@ def test_download_missing_startup_files_only_fetches_uncached_files(monkeypatch)
         "_is_cached",
         lambda _repo, filename: filename == "already.jsonl",
     )
-    monkeypatch.setattr(datasets.st, "warning", warnings.append)
+    monkeypatch.setattr(datasets.st, "empty", lambda: notice)
     monkeypatch.setattr(
         datasets.st,
         "progress",
@@ -41,7 +53,8 @@ def test_download_missing_startup_files_only_fetches_uncached_files(monkeypatch)
         "Example",
     )
 
-    assert warnings and "First-time setup for Example" in warnings[0]
+    assert notice.messages and "First-time setup for Example" in notice.messages[0]
+    assert notice.empty_calls == 1
     assert downloads == [("org/repo", "missing.jsonl", "dataset")]
     assert progress.updates[-1] == (1.0, "Downloaded missing.jsonl (1/1)")
 
@@ -52,7 +65,7 @@ def test_download_missing_startup_files_stays_quiet_when_cached(monkeypatch):
     def unexpected(*_args, **_kwargs):
         raise AssertionError("cold-download UI should not render for warm cache")
 
-    monkeypatch.setattr(datasets.st, "warning", unexpected)
+    monkeypatch.setattr(datasets.st, "empty", unexpected)
     monkeypatch.setattr(datasets.st, "progress", unexpected)
     monkeypatch.setattr(datasets, "hf_hub_download", unexpected)
 

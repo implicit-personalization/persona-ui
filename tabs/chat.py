@@ -28,7 +28,7 @@ from tabs.chat_ui import (
 from utils.chat import build_chat_messages, resolve_system_prompt
 from utils.chat_export import save_chat_export
 from utils.helpers import format_ndif_status, session_key, widget_key
-from utils.runtime import cached_model
+from utils.runtime import cached_model, session_ndif_api_key
 
 if TYPE_CHECKING:
     from persona_data.synth_persona import PersonaData
@@ -129,6 +129,7 @@ def _handle_single_chat_generation(
             generation=generation,
             on_status=_show_ndif_status if remote else None,
             on_error=_show_error,
+            ndif_api_key=session_ndif_api_key(),
         )
         if error is not None:
             status_box.empty()

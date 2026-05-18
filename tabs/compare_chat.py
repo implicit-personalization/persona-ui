@@ -15,7 +15,7 @@ from utils.chat import ChatReply, build_chat_messages, resolve_system_prompt
 from utils.chat_export import save_chat_export
 from utils.contrast import compute_contrast, compute_contrast_pair
 from utils.helpers import format_ndif_status, persona_label, session_key, widget_key
-from utils.runtime import cached_model
+from utils.runtime import cached_model, session_ndif_api_key
 
 from .chat_ui import (
     GenerationConfig,
@@ -173,6 +173,7 @@ def _generate_panels(
                 remote=remote,
                 generation=generation,
                 on_status=_show_ndif_status if remote else None,
+                ndif_api_key=session_ndif_api_key(),
             )
             results.append(reply if error is None else error)
     status_box.empty()
@@ -254,6 +255,7 @@ def _recompute_pending_contrast(
                     label_a=label_a,
                     label_b=label_b,
                     remote=remote,
+                    ndif_api_key=session_ndif_api_key(),
                 )
                 if contrast is not None:
                     msg["_contrast"] = contrast
@@ -295,7 +297,7 @@ def _render_compare_footer(
 
     footer = st.container()
     with footer:
-        exp_col, rst_col, _spacer = st.columns([1, 1.25, 17.5], gap="xsmall")
+        exp_col, rst_col, _spacer = st.columns([1, 1.25, 20], gap="xsmall")
         with exp_col:
             if st.button(
                 "",
@@ -379,6 +381,7 @@ def _compute_new_reply_contrast(
                 label_a=persona_label(left.persona),
                 label_b=persona_label(right.persona),
                 remote=remote,
+                ndif_api_key=session_ndif_api_key(),
             )
             if left_contrast is not None:
                 left.state["messages"][-1]["_contrast"] = left_contrast

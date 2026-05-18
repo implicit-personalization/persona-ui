@@ -51,6 +51,7 @@ def trace_conversation(
     layer: int,
     location: str,
     remote: bool,
+    ndif_api_key: str | None = None,
 ) -> ConversationTrace:
     prompt_text, _ = format_generation_prompt(
         messages,
@@ -71,7 +72,13 @@ def trace_conversation(
         return cached
 
     accessor = _select_accessor(model, location)
-    with torch.no_grad(), model.trace(prompt_text, remote=remote):
+    if remote:
+        from utils.runtime import remote_backend
+
+        backend = remote_backend(model, ndif_api_key)
+    else:
+        backend = None
+    with torch.no_grad(), model.trace(prompt_text, remote=remote, backend=backend):
         saved_ids = model.input_ids[0].detach().cpu().save()
         saved_acts = accessor[layer][0].detach().float().cpu().save()
 

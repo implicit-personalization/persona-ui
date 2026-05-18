@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from utils.analysis_sources import DEFAULT_COMPARE_MODEL, DEFAULT_HUB_REPO, SOURCE_HUB
 from utils.helpers import DATASET_SOURCES, session_key, widget_key
 from utils.preload import preload_once
-from utils.runtime import list_remote_models
+from utils.runtime import configured_ndif_api_key, list_remote_models
 from utils.theme import active_base, install_catppuccin_theme
 
 load_dotenv()
@@ -181,10 +181,10 @@ def _remote_model_input(remote_models: list[str]) -> str:
 
 
 def _ndif_api_key_input() -> None:
-    """Prompt for an NDIF API key when none is configured via the environment."""
-    import nnsight
+    """Prompt for a per-session NDIF API key."""
 
-    if os.environ.get("NDIF_API_KEY") or nnsight.CONFIG.API.APIKEY:
+    if configured_ndif_api_key():
+        st.caption("Using NDIF API key from environment.")
         return
 
     api_key = st.text_input(
@@ -193,9 +193,7 @@ def _ndif_api_key_input() -> None:
         key=_SIDEBAR_NDIF_API_KEY,
         help=f"Required for remote (NDIF) execution. Register at {NDIF_REGISTRATION_URL}",
     )
-    if api_key:
-        nnsight.CONFIG.API.APIKEY = api_key
-    else:
+    if not api_key:
         st.caption(f"No NDIF API key found. [Get one]({NDIF_REGISTRATION_URL}).")
 
 

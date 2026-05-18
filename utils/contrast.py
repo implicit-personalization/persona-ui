@@ -100,6 +100,7 @@ def _score_passes(
     model: StandardizedTransformer,
     specs: list[PassSpec],
     remote: bool,
+    ndif_api_key: str | None = None,
 ) -> dict[str, torch.Tensor]:
     """
     Run one forward pass per spec and return reduced per-token logprobs.
@@ -115,7 +116,13 @@ def _score_passes(
         n_resp: int,
         target_ids: torch.Tensor,
     ) -> torch.Tensor:
-        with torch.no_grad(), model.trace(input_ids, remote=remote):
+        if remote:
+            from utils.runtime import remote_backend
+
+            backend = remote_backend(model, ndif_api_key)
+        else:
+            backend = None
+        with torch.no_grad(), model.trace(input_ids, remote=remote, backend=backend):
             # logit at position i predicts token i+1, so response token j
             # (at full-text position n_ctx+j) uses logit at n_ctx+j-1.
             resp_logits = model.logits[0, n_ctx - 1 : n_ctx - 1 + n_resp].float()
@@ -157,6 +164,7 @@ def compute_contrast(
     label_a: str,
     label_b: str,
     remote: bool = False,
+    ndif_api_key: str | None = None,
 ) -> "TokenContrast | None":
     """Compute per-token contrast weights for a single response (2 forward passes)."""
     tokenizer = model.tokenizer
@@ -164,7 +172,7 @@ def compute_contrast(
         return None
 
     specs = _specs_for_response(tokenizer, response_ids, context_a, context_b, "r")
-    out = _score_passes(model, specs, remote)
+    out = _score_passes(model, specs, remote, ndif_api_key)
     return _build_contrast(
         tokenizer, response_ids, out["r_under_a"], out["r_under_b"], label_a, label_b
     )
@@ -179,6 +187,7 @@ def compute_contrast_pair(
     label_a: str,
     label_b: str,
     remote: bool = False,
+    ndif_api_key: str | None = None,
 ) -> tuple["TokenContrast | None", "TokenContrast | None"]:
     """
     Compute contrast weights for both panel responses (up to 4 remote passes).
@@ -197,7 +206,7 @@ def compute_contrast_pair(
             tokenizer, response_ids_b, context_a, context_b, "b"
         )
 
-    out = _score_passes(model, specs, remote)
+    out = _score_passes(model, specs, remote, ndif_api_key)
 
     def _build(resp_ids: torch.Tensor, prefix: str) -> "TokenContrast | None":
         k_a, k_b = f"{prefix}_under_a", f"{prefix}_under_b"

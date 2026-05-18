@@ -1,15 +1,17 @@
 import json
 import logging
+import os
 from collections.abc import Iterable
 
 import streamlit as st
 
-from utils.helpers import env_int
+from utils.helpers import env_int, session_key
 
 logger = logging.getLogger(__name__)
 _LANGUAGE_MODEL_CLASSES = {"LanguageModel", "StandardizedTransformer"}
 _EXPECTED_NDIF_STATES = {"RUNNING", "NOT DEPLOYED", "DEPLOYING", "DELETING"}
 _MODEL_CACHE_ENTRIES = env_int("PERSONA_UI_MODEL_CACHE_ENTRIES", 1)
+_SESSION_NDIF_API_KEY = session_key("sidebar", "ndif_api_key")
 
 
 def _iter_deployments(raw: object) -> Iterable[dict]:
@@ -60,17 +62,17 @@ def _unexpected_state(deployment: dict) -> tuple[str, str] | None:
 def list_remote_models() -> list[str]:
     """Return the NDIF language models that are currently running.
 
-    Parses the raw NDIF response directly instead of going through
-    ``nnsight.ndif_status()`` because that call crashes whenever NDIF reports
+    Parses the raw NDIF response directly instead of going through the formatted
+    ``nnsight.ndif.status()`` response because formatting crashes whenever NDIF reports
     any deployment with an ``application_state`` that isn't in nnsight's
     ``ModelStatus`` enum (e.g. ``UNHEALTHY``) — one bad deployment poisons
     the whole response. See nnsight 0.6.3 ``ndif.py::status``.
     """
 
-    import nnsight
+    from nnsight.ndif import status
 
     try:
-        raw = nnsight.ndif_status(raw=True)
+        raw = status(raw=True)
     except Exception:
         logger.warning("Failed to fetch NDIF status", exc_info=True)
         return []
@@ -92,6 +94,52 @@ def list_remote_models() -> list[str]:
         )
 
     return sorted(set(model_names))
+
+
+def session_ndif_api_key() -> str | None:
+    """Return this visitor's NDIF key without touching process globals."""
+
+    value = st.session_state.get(_SESSION_NDIF_API_KEY)
+    return value if isinstance(value, str) and value else None
+
+
+def configured_ndif_api_key() -> str | None:
+    """Return an app-level NDIF key configured through the environment, if any."""
+
+    value = os.environ.get("NDIF_API_KEY")
+    return value if value else None
+
+
+def remote_backend(model: object, api_key: str | None = None, *, on_status=None):
+    """Build an NDIF backend with credentials bound to one browser session."""
+
+    from nnsight.intervention.backends.remote import JobStatusDisplay, RemoteBackend
+
+    active_key = api_key or session_ndif_api_key() or configured_ndif_api_key()
+    if not active_key:
+        raise RuntimeError("Enter your NDIF API key before using remote execution.")
+
+    backend = RemoteBackend(model.to_model_key(), api_key=active_key)
+    backend.CONNECT_TIMEOUT = 300.0
+    if on_status is None:
+        return backend
+
+    class _CallbackJobStatusDisplay(JobStatusDisplay):
+        def update(
+            self,
+            job_id: str = "",
+            status_name: str = "",
+            description: str = "",
+        ):
+            super().update(job_id, status_name, description)
+            if status_name:
+                on_status(job_id, status_name, description)
+
+    backend.status_display = _CallbackJobStatusDisplay(
+        enabled=True,
+        verbose=backend.verbose,
+    )
+    return backend
 
 
 @st.cache_resource(show_spinner=False, max_entries=_MODEL_CACHE_ENTRIES)

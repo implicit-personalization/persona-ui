@@ -183,7 +183,8 @@ def _download_missing_startup_files_if_needed(
     if not missing:
         return
 
-    st.warning(
+    notice = st.empty()
+    notice.warning(
         f"First-time setup for {label}: downloading dataset files from Hugging Face. "
         "Later loads should use the local cache."
     )
@@ -199,6 +200,7 @@ def _download_missing_startup_files_if_needed(
             index / total,
             text=f"Downloaded {filename} ({index}/{total})",
         )
+    notice.empty()
 
 
 def _prepare_nemotron_startup_download(dataset_source: str, label: str) -> None:

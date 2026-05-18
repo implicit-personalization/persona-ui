@@ -63,11 +63,9 @@ cp .env.example .env
 
 ## Local Development
 
-This checkout is configured to use the sibling `../persona-vectors` package as
-an editable dependency. For deployment, switch `persona-vectors` back to the
-published package or another installable source.
-
-`persona-data` can also be checked out next to this repo for local package work.
+The checked-in dependency config uses published packages. For local package
+work, uncomment the `tool.uv.sources` block in `pyproject.toml` and keep sibling
+checkouts next to this repo.
 
 Example:
 
@@ -97,13 +95,15 @@ This app can be deployed to Hugging Face Spaces using Docker.
 
 ### Prerequisites
 
-No secrets needed! The dependencies are published on PyPI.
+Dependencies are published on PyPI, so deployment does not require sibling
+checkouts. Remote NDIF execution still needs an API key, either configured as an
+environment variable or entered by each user in the sidebar.
 
 ### Build Locally (Optional)
 
 ```bash
 docker build -t persona-ui .
-# Specify your local .env to have things working as expectd
+# Pass your local .env if you want the container to use the same configuration
 docker run --env-file .env --rm -p 8501:8501 persona-ui
 ```
 
@@ -112,7 +112,7 @@ docker run --env-file .env --rm -p 8501:8501 persona-ui
 Copy `.env.example` to `.env` and fill in:
 
 ```bash
-NDIF_API_KEY=...       # Required for remote (NDIF) model execution
+NDIF_API_KEY=...       # Optional shared NDIF key; users can also enter one per session
 HF_HOME=...            # Optional: HuggingFace cache directory
 ARTIFACTS_DIR=...      # Optional: where persona vectors are read from (default: ./artifacts)
 PERSONA_VECTORS_HUB_REPO=...  # Optional: default Analysis/Probing Hub dataset repo
@@ -122,7 +122,9 @@ PERSONA_UI_FIGURE_STATE_ENTRIES=2     # Optional: recent rendered Analysis figur
 PERSONA_UI_PREPARED_STATE_ENTRIES=4   # Optional: recent projection-ready markers kept in-session
 ```
 
-The app picks up this file automatically via `load_dotenv()` on startup.
+The app picks up this file automatically via `load_dotenv()` on startup. If
+`NDIF_API_KEY` is unset, Chat and Extract users are prompted for a per-session
+key when they need remote execution.
 
 ## Persona Vectors
 

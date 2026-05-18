@@ -109,6 +109,7 @@ def generate_chat_reply_result(
     generation: GenerationConfig,
     on_status: Callable[[str, str, str], None] | None = None,
     on_error: Callable[[Exception], None] | None = None,
+    ndif_api_key: str | None = None,
 ) -> tuple[ChatReply | None, Exception | None]:
     try:
         return (
@@ -117,6 +118,7 @@ def generate_chat_reply_result(
                 messages=messages,
                 remote=remote,
                 on_status=on_status,
+                ndif_api_key=ndif_api_key,
                 **generation.to_generate_kwargs(),
             ),
             None,
