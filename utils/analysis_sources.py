@@ -7,8 +7,8 @@ from persona_vectors.analysis import (
     load_analysis_dataset,
 )
 from persona_vectors.artifacts import (
-    PersonaVectorStore,
     HFPersonaVectorStore,
+    PersonaVectorStore,
     discover_activation_models,
     model_dir_name,
 )

@@ -11,6 +11,7 @@ from persona_data.prompts import normalize_messages, supports_system_role
 from utils.chat import decode_token, format_generation_prompt, resolve_saved_tensor
 
 _TRACE_CACHE_KEY = "probe:trace_cache"
+_DERIVED_CACHE_TRACKER_KEY = "probe:derived_cache_keys"
 _MAX_CACHED_TRACES = 3
 
 
@@ -92,9 +93,7 @@ def trace_conversation(
 
     n_tokens = int(input_ids.shape[0])
     assistant_spans = _clip_spans(
-        _assistant_spans_from_offsets(
-            model.tokenizer, prompt_text, messages, n_tokens
-        ),
+        _assistant_spans_from_offsets(model.tokenizer, prompt_text, messages, n_tokens),
         n_tokens,
     )
     if not assistant_spans and assistant_mask_seq is not None:
@@ -182,6 +181,30 @@ def _store_cached_trace(cache_key: str, trace: ConversationTrace) -> None:
     while len(cache) > _MAX_CACHED_TRACES:
         oldest_key = next(iter(cache))
         cache.pop(oldest_key, None)
+        _drop_derived_results_for_trace(oldest_key)
+
+
+def _drop_derived_results_for_trace(cache_key: str) -> None:
+    """Remove probe predictions tied to a trace that just aged out."""
+
+    prefixes = (
+        f"probe_predictions::{cache_key}::",
+        f"probe_values::{cache_key}::",
+    )
+    tracked = st.session_state.get(_DERIVED_CACHE_TRACKER_KEY)
+    if isinstance(tracked, list):
+        kept: list[str] = []
+        for key in tracked:
+            if isinstance(key, str) and key.startswith(prefixes):
+                st.session_state.pop(key, None)
+            else:
+                kept.append(key)
+        st.session_state[_DERIVED_CACHE_TRACKER_KEY] = kept
+        return
+
+    for key in list(st.session_state):
+        if isinstance(key, str) and key.startswith(prefixes):
+            st.session_state.pop(key, None)
 
 
 def _compute_assistant_mask(
@@ -302,9 +325,7 @@ def _assistant_spans_from_prefixes(
         for i, message in enumerate(messages):
             if message.get("role") != "assistant":
                 continue
-            prefix_ids = apply(
-                messages[:i], tokenize=True, add_generation_prompt=True
-            )
+            prefix_ids = apply(messages[:i], tokenize=True, add_generation_prompt=True)
             through_ids = apply(
                 messages[: i + 1], tokenize=True, add_generation_prompt=False
             )
@@ -332,9 +353,7 @@ def _flatten_ids(value: object) -> list[int] | None:
         return None
 
 
-def _clip_spans(
-    spans: list[tuple[int, int]], n_tokens: int
-) -> list[tuple[int, int]]:
+def _clip_spans(spans: list[tuple[int, int]], n_tokens: int) -> list[tuple[int, int]]:
     clipped: list[tuple[int, int]] = []
     for start, end in spans:
         s = max(0, min(start, n_tokens))

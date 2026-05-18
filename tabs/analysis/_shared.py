@@ -261,6 +261,7 @@ def _render_persona_count_controls(
     *,
     default_count: int,
     include_assistant_default: bool,
+    max_count_limit: int | None = None,
 ) -> tuple[int, bool]:
     count_key = widget_key(
         "load",
@@ -280,11 +281,16 @@ def _render_persona_count_controls(
     )
 
     if options.regular_ids:
+        max_count = (
+            min(max_count_limit, len(options.regular_ids))
+            if max_count_limit is not None
+            else len(options.regular_ids)
+        )
         persona_count = st.slider(
             "Personas",
             min_value=0 if options.assistant_id is not None else 1,
-            max_value=len(options.regular_ids),
-            value=default_count,
+            max_value=max_count,
+            value=min(default_count, max_count),
             key=count_key,
             help="Use the first N available non-assistant personas.",
         )
@@ -310,6 +316,7 @@ def _select_artifact_personas(
     remember_key: str,
     default_all: bool = False,
     default_count_limit: int | None = None,
+    max_count_limit: int | None = None,
 ) -> list[str]:
     empty_message = _personas_empty_message(variants)
     options = _load_persona_options(
@@ -336,6 +343,7 @@ def _select_artifact_personas(
         options,
         default_count=default_count,
         include_assistant_default=include_assistant_default,
+        max_count_limit=max_count_limit,
     )
 
     persona_ids = options.regular_ids[:persona_count]
@@ -359,6 +367,48 @@ def _select_artifact_personas(
     )
     st.caption(f"Using {regular_label}{assistant_label}.")
     return persona_ids
+
+
+def _render_persona_select_controls(
+    options: PersonaOptions,
+    widget_scope: str,
+    *,
+    max_selections: int | None = None,
+) -> list[str]:
+    select_key = widget_key("load", "persona_select", widget_scope)
+    assistant_key = widget_key("load", "persona_select_assistant", widget_scope)
+
+    label_map = {
+        persona_id: f"{options.persona_names.get(persona_id, persona_id)} ({persona_id})"
+        for persona_id in options.regular_ids
+    }
+    sorted_labels = sorted(label_map.values())
+    selected_labels = st.multiselect(
+        "Select personas",
+        options=sorted_labels,
+        key=select_key,
+        placeholder="Search and select personas...",
+        max_selections=max_selections,
+    )
+    label_to_id = {label: persona_id for persona_id, label in label_map.items()}
+    selected_ids = [label_to_id[label] for label in selected_labels]
+
+    if options.assistant_id is not None:
+        include_assistant = st.checkbox(
+            "Include Assistant persona",
+            key=assistant_key,
+        )
+        if include_assistant:
+            selected_ids.append(options.assistant_id)
+
+    st.session_state[_persona_names_state_key(widget_scope)] = dict(
+        options.persona_names
+    )
+
+    if not selected_ids:
+        st.info("Select at least one persona.")
+
+    return selected_ids
 
 
 def _render_save_buttons(
@@ -398,6 +448,7 @@ def _render_mask_strategy_select(scope: str) -> MaskStrategy:
     return render_mask_strategy_select(
         key=widget_key("load", "mask_strategy", scope),
         last_key=_LAST_MASK_STRATEGY_KEY,
+        remember_key="source:last_mask_strategy",
         help_text="Which extracted activation set to load.",
     )
 
@@ -410,6 +461,8 @@ def _select_single_variant_samples(
     remember_key: str,
     variant_remember_key: str,
     default_count_limit: int,
+    max_count_limit: int | None = None,
+    allow_specific_personas: bool = False,
 ) -> tuple[str, list[str], str, list[int]] | None:
     variants = available_variants(store, mask_strategy)
     if not variants:
@@ -425,14 +478,41 @@ def _select_single_variant_samples(
         default=default_variant,
         format_func=prompt_variant_label,
     )
-    persona_ids = _select_artifact_personas(
-        store,
-        [variant],
-        mask_strategy,
-        widget_scope=f"{scope}:{store_id(store)}",
-        remember_key=remember_key,
-        default_count_limit=default_count_limit,
-    )
+    widget_scope = f"{scope}:{store_id(store)}"
+    select_specific = False
+    if allow_specific_personas:
+        select_specific = st.toggle(
+            "Select specific personas",
+            value=False,
+            key=widget_key("load", "select_specific_personas", scope, store_id(store)),
+            help="Search and select specific personas instead of using the first N.",
+        )
+
+    if select_specific:
+        options = _load_persona_options(
+            store,
+            [variant],
+            mask_strategy,
+            empty_message=_personas_empty_message([variant]),
+        )
+        if options is None:
+            st.session_state.pop(_persona_names_state_key(widget_scope), None)
+            return None
+        persona_ids = _render_persona_select_controls(
+            options,
+            widget_scope,
+            max_selections=max_count_limit,
+        )
+    else:
+        persona_ids = _select_artifact_personas(
+            store,
+            [variant],
+            mask_strategy,
+            widget_scope=widget_scope,
+            remember_key=remember_key,
+            default_count_limit=default_count_limit,
+            max_count_limit=max_count_limit,
+        )
     if not persona_ids:
         return None
 

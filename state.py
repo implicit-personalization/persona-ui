@@ -21,9 +21,19 @@ class ChatState(TypedDict):
 
 
 def chat_session_key(model_name: str, dataset_source: str) -> str:
-    """Build the session-state key for a chat context."""
+    """Build the session-state key for a chat conversation.
 
-    return session_key("chat_state", model_name, dataset_source)
+    A model/backend switch changes *how* the next turn is generated, not which
+    conversation the user is looking at. Keeping the model out of the key means
+    toggling local/remote execution (or selecting another model) no longer makes
+    an existing thread appear to vanish behind a fresh empty state.
+
+    ``model_name`` stays in the signature for call-site compatibility and to
+    make the intent explicit where chat state is requested.
+    """
+
+    _ = model_name
+    return session_key("chat_state", dataset_source)
 
 
 def default_chat_state() -> ChatState:

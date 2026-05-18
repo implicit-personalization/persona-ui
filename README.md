@@ -118,6 +118,8 @@ ARTIFACTS_DIR=...      # Optional: where persona vectors are read from (default:
 PERSONA_VECTORS_HUB_REPO=...  # Optional: default Analysis/Probing Hub dataset repo
 PERSONA_UI_VECTOR_CACHE_ENTRIES=4     # Optional: loaded analysis datasets kept warm
 PERSONA_UI_PREPARED_CACHE_ENTRIES=8   # Optional: prepared projections / k-means groups kept warm
+PERSONA_UI_FIGURE_STATE_ENTRIES=2     # Optional: recent rendered Analysis figures kept in-session
+PERSONA_UI_PREPARED_STATE_ENTRIES=4   # Optional: recent projection-ready markers kept in-session
 ```
 
 The app picks up this file automatically via `load_dotenv()` on startup.
@@ -153,4 +155,4 @@ The store classes are `PersonaVectorStore` (local) and `HFPersonaVectorStore`
 
 ## Analysis responsiveness
 
-The Analysis tab keeps a small bounded cache of loaded vector datasets and prepared projection data. Once a projection has been computed, recoloring it by persona, attribute, or k-means group reuses the same coordinates; nearby Hub interactions also keep metadata warm instead of re-scanning after every figure. Tune `PERSONA_UI_VECTOR_CACHE_ENTRIES` if RAM is tight or you regularly switch among many selections, and `PERSONA_UI_PREPARED_CACHE_ENTRIES` if you revisit several projection configurations in one session.
+The Analysis tab keeps small bounded caches of loaded vector datasets, prepared projection data, and a tiny MRU window of rendered figures. Once a projection has been computed, recoloring it by persona, attribute, or k-means group reuses the same coordinates; nearby method switches can reuse the last couple of figures instead of rebuilding immediately, while the caps keep RAM bounded. Tune `PERSONA_UI_VECTOR_CACHE_ENTRIES` if RAM is tight or you regularly switch among many selections, `PERSONA_UI_PREPARED_CACHE_ENTRIES` if you revisit several projection configurations in one session, and `PERSONA_UI_FIGURE_STATE_ENTRIES` if you want more or less method-switch warmth. Probe loading, probe sweeps, and per-trace probe outputs are bounded separately via `PERSONA_UI_PROBE_CACHE_ENTRIES`, `PERSONA_UI_PROBE_SWEEP_CACHE_ENTRIES`, and `PERSONA_UI_PROBE_DERIVED_CACHE_ENTRIES`; the derived-output cache defaults to a wider MRU window because those tensors are small compared with traced activations and are cheap wins to keep warm.

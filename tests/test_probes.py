@@ -11,16 +11,15 @@ two correctness fixes:
 
 import pytest
 import torch
-
 from persona_vectors.probes import ProbeArtifact
+
+from utils.probe_files import parse_probe_filename
 from utils.probes import (
     LoadedProbe,
     _LinearProbe,
     _loaded_probe_from_artifact,
     _normalize_labels,
-    parse_probe_filename,
 )
-
 
 # --------------------------------------------------------------------------- #
 # parse_probe_filename
@@ -123,9 +122,7 @@ def test_normalize_batch_pca_only_applies_pca():
     probe = _probe(
         2,
         pca_mean=torch.ones(3),
-        pca_components=torch.tensor(
-            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
-        ),
+        pca_components=torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
     )
     batch = torch.tensor([[2.0, 4.0, 9.0]])
     out = probe._normalize_batch(batch)

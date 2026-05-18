@@ -14,7 +14,7 @@ from tabs.chat_shared import (
 from utils.chat import ChatReply, build_chat_messages, resolve_system_prompt
 from utils.chat_export import save_chat_export
 from utils.contrast import compute_contrast, compute_contrast_pair
-from utils.helpers import persona_label, session_key, widget_key
+from utils.helpers import format_ndif_status, persona_label, session_key, widget_key
 from utils.runtime import cached_model
 
 from .chat_ui import (
@@ -142,15 +142,40 @@ def _generate_panels(
     spinner_label: str,
 ) -> list[ChatReply | Exception]:
     results: list[ChatReply | Exception] = []
+    status_box = st.empty()
     with st.spinner(spinner_label):
         for panel in panels:
+            panel_label = panel.side.title()
+            status_box.caption(
+                f"{panel_label}: {'Submitting to NDIF...' if remote else 'Generating locally...'}"
+            )
+
+            def _show_ndif_status(
+                job_id: str,
+                status_name: str,
+                description: str,
+                *,
+                label: str = panel_label,
+            ) -> None:
+                status_box.caption(
+                    format_ndif_status(
+                        job_id,
+                        status_name,
+                        description,
+                        prefix=label,
+                        completed_detail="Downloading result...",
+                    )
+                )
+
             reply, error = generate_chat_reply_result(
                 model=model,
                 messages=build_chat_messages(panel.prompt, panel.state["messages"]),
                 remote=remote,
                 generation=generation,
+                on_status=_show_ndif_status if remote else None,
             )
             results.append(reply if error is None else error)
+    status_box.empty()
     return results
 
 

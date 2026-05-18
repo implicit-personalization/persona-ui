@@ -2,29 +2,13 @@ from collections.abc import Callable
 
 import plotly.graph_objects as go
 import streamlit as st
-from persona_vectors.attributes import (
-    attribute_color_kwargs,
-    attribute_display_label,
-)
+from persona_vectors.attributes import attribute_color_kwargs, attribute_display_label
 from persona_vectors.extraction import MaskStrategy
 from persona_vectors.plots import (
     build_layered_figure,
     build_pair_similarity_figure,
     build_similarity_figures,
 )
-
-from utils.analysis_metadata import (
-    synth_persona_attribute_names,
-    synth_persona_dataset_cached,
-)
-from utils.analysis_sources import (
-    Store,
-    kmeans_groups_cached,
-    projection_data_cached,
-    store_cache_parts,
-    store_id,
-)
-from utils.helpers import personas_fingerprint, prompt_variant_label, widget_key
 
 from tabs.analysis._shared import (
     _gray_out_unselected_personas,
@@ -61,6 +45,18 @@ from tabs.analysis._state import (
     _remembered_selectbox,
     _store_figure_state,
 )
+from utils.analysis_metadata import (
+    synth_persona_attribute_names,
+    synth_persona_dataset_cached,
+)
+from utils.analysis_sources import (
+    Store,
+    kmeans_groups_cached,
+    projection_data_cached,
+    store_cache_parts,
+    store_id,
+)
+from utils.helpers import personas_fingerprint, prompt_variant_label, widget_key
 
 
 def _render_pair_trajectory_control(
@@ -446,6 +442,8 @@ def _render_layered_figure_analysis(
     n_components: int = 2,
     remember_key: str = _LAST_PROJECTION_PERSONAS_KEY,
     default_count_limit: int = 500,
+    max_count_limit: int | None = None,
+    allow_specific_personas: bool = False,
 ) -> None:
     """Render a single-variant layered analysis: select → button → figure(s).
 
@@ -463,6 +461,8 @@ def _render_layered_figure_analysis(
             else _LAST_SIMILARITY_VARIANT_KEY
         ),
         default_count_limit=default_count_limit,
+        max_count_limit=max_count_limit,
+        allow_specific_personas=allow_specific_personas,
     )
     if selected is None:
         return

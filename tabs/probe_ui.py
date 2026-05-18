@@ -6,7 +6,15 @@ import streamlit as st
 import torch
 
 from utils.chat import build_chat_messages
-from utils.helpers import session_key, widget_key
+from utils.helpers import env_int, session_key, widget_key
+from utils.probe_files import (
+    DEFAULT_LOCAL_PROBE_DIR,
+    DEFAULT_PROBE_REPO,
+    list_local_probe_files,
+    list_probe_files,
+    model_probe_dir_name,
+    parse_probe_filename,
+)
 from utils.probe_overlay import (
     attach_overlays,
     build_classification_overlays,
@@ -15,24 +23,25 @@ from utils.probe_overlay import (
 )
 from utils.probe_trace import ConversationTrace, trace_conversation
 from utils.probes import (
-    DEFAULT_LOCAL_PROBE_DIR,
-    DEFAULT_PROBE_REPO,
     LoadedProbe,
-    list_local_probe_files,
-    list_probe_files,
     load_local_probe,
     load_probe,
     load_probe_from_bytes,
-    model_probe_dir_name,
-    parse_probe_filename,
 )
 from utils.runtime import cached_model
+from utils.selection_controls import remembered_segmented_control
 
 _LAST_SOURCE_KEY = session_key("probe", "last_source")
 _LAST_LOCAL_FILE_KEY = session_key("probe", "last_local_file")
 _LAST_HUB_FILE_KEY = session_key("probe", "last_hub_file")
 
 _PROBE_SOURCES = ("Local artifact", "Hugging Face repo", "Upload .pt")
+_DERIVED_CACHE_TRACKER_KEY = session_key("probe", "derived_cache_keys")
+# Keep enough room for the three retained traces plus a few recently explored
+# probes per trace. Derived outputs are much smaller than the trace activations
+# themselves, so this avoids needless recomputation without reopening
+# unbounded growth.
+_DERIVED_CACHE_ENTRIES = env_int("PERSONA_UI_PROBE_DERIVED_CACHE_ENTRIES", 12)
 
 
 # ---------------------------------------------------------------------------
@@ -62,23 +71,16 @@ def _default_file(files: list[str], remembered: str | None) -> str:
     return files[0]
 
 
-def _render_probe_selector(
-    *, context_key: str, model_name: str
-) -> LoadedProbe | None:
+def _render_probe_selector(*, context_key: str, model_name: str) -> LoadedProbe | None:
     """Inline source + file selector. Returns the loaded probe or None."""
-    source_key = widget_key(context_key, "probe_source")
-    if source_key not in st.session_state:
-        st.session_state[source_key] = st.session_state.get(
-            _LAST_SOURCE_KEY, _PROBE_SOURCES[0]
-        )
-    source = st.segmented_control(
+    source = remembered_segmented_control(
         "Probe source",
         options=_PROBE_SOURCES,
-        key=source_key,
+        key=widget_key(context_key, "probe_source"),
+        remember_key=_LAST_SOURCE_KEY,
+        default=_PROBE_SOURCES[0],
         label_visibility="collapsed",
     )
-    source = source or _PROBE_SOURCES[0]
-    st.session_state[_LAST_SOURCE_KEY] = source
 
     if source == "Local artifact":
         return _render_local_probe(context_key=context_key, model_name=model_name)
@@ -87,9 +89,7 @@ def _render_probe_selector(
     return _render_upload_probe(context_key=context_key)
 
 
-def _render_local_probe(
-    *, context_key: str, model_name: str
-) -> LoadedProbe | None:
+def _render_local_probe(*, context_key: str, model_name: str) -> LoadedProbe | None:
     root_dir = st.text_input(
         "Probe directory",
         value=st.session_state.get(
@@ -118,9 +118,7 @@ def _render_local_probe(
         return None
 
 
-def _render_hub_probe(
-    *, context_key: str, model_name: str
-) -> LoadedProbe | None:
+def _render_hub_probe(*, context_key: str, model_name: str) -> LoadedProbe | None:
     repo_id = st.text_input(
         "Probe repo",
         value=st.session_state.get(
@@ -249,15 +247,43 @@ def _validate(
 # ---------------------------------------------------------------------------
 
 
+def _store_derived_cache(key: str, value: object) -> None:
+    """Store one derived probe result while keeping a small MRU window."""
+
+    tracked = st.session_state.setdefault(_DERIVED_CACHE_TRACKER_KEY, [])
+    if not isinstance(tracked, list):
+        tracked = []
+    tracked = [existing for existing in tracked if existing != key]
+    tracked.append(key)
+    while len(tracked) > _DERIVED_CACHE_ENTRIES:
+        st.session_state.pop(tracked.pop(0), None)
+    st.session_state[_DERIVED_CACHE_TRACKER_KEY] = tracked
+    st.session_state[key] = value
+
+
+def _get_derived_cache(key: str) -> object | None:
+    """Return a derived probe result and refresh its MRU position."""
+
+    cached = st.session_state.get(key)
+    if cached is None:
+        return None
+    tracked = st.session_state.get(_DERIVED_CACHE_TRACKER_KEY)
+    if isinstance(tracked, list) and key in tracked:
+        tracked = [existing for existing in tracked if existing != key]
+        tracked.append(key)
+        st.session_state[_DERIVED_CACHE_TRACKER_KEY] = tracked
+    return cached
+
+
 def _classification_predictions(
     probe: LoadedProbe, activations: torch.Tensor, cache_key: str
 ) -> tuple[torch.Tensor, torch.Tensor]:
     full_key = widget_key("probe_predictions", cache_key, str(id(probe)))
-    cached = st.session_state.get(full_key)
+    cached = _get_derived_cache(full_key)
     if cached is not None:
         return cached
     _, probs, predicted = probe.run_batch(activations)
-    st.session_state[full_key] = (probs, predicted)
+    _store_derived_cache(full_key, (probs, predicted))
     return probs, predicted
 
 
@@ -265,11 +291,11 @@ def _regression_values(
     probe: LoadedProbe, activations: torch.Tensor, cache_key: str
 ) -> torch.Tensor:
     full_key = widget_key("probe_values", cache_key, str(id(probe)))
-    cached = st.session_state.get(full_key)
+    cached = _get_derived_cache(full_key)
     if cached is not None:
         return cached
     values = probe.predict_batch(activations)
-    st.session_state[full_key] = values
+    _store_derived_cache(full_key, values)
     return values
 
 
@@ -297,9 +323,7 @@ def _apply_overlays(
         probs, predicted = _classification_predictions(
             probe, trace.activations, trace.cache_key
         )
-        binary = probs.shape[1] == 1 or (
-            probs.shape[1] == 2 and len(probe.labels) == 2
-        )
+        binary = probs.shape[1] == 1 or (probs.shape[1] == 2 and len(probe.labels) == 2)
         overlays = build_classification_overlays(
             trace=trace,
             probs=probs,
@@ -332,9 +356,7 @@ def render_probe_inspector(
     def _conversation_sig() -> int:
         return hash(
             tuple(
-                (m.get("role"), m.get("content"))
-                for m in messages
-                if m.get("content")
+                (m.get("role"), m.get("content")) for m in messages if m.get("content")
             )
         )
 
@@ -349,9 +371,7 @@ def render_probe_inspector(
             st.caption("Probe overlay shows up after the first assistant reply.")
             return
 
-        probe = _render_probe_selector(
-            context_key=context_key, model_name=model_name
-        )
+        probe = _render_probe_selector(context_key=context_key, model_name=model_name)
         if probe is None:
             _reset()
             return

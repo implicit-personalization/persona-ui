@@ -4,7 +4,7 @@ import streamlit as st
 from persona_data.synth_persona import BASELINE_PERSONA_ID
 from persona_vectors.attributes import DEFAULT_MAX_ATTRIBUTE_CATEGORIES
 
-from utils.helpers import slugify, widget_key
+from utils.helpers import env_int, slugify, widget_key
 
 
 def _filename(*parts: str) -> str:
@@ -30,11 +30,15 @@ _LAST_LAYER_FRAMES_KEY = "analysis:last_layer_frames"
 
 _DEFAULT_LAYER_FRAMES = 16
 _DEFAULT_PERSONA_LIMITS = {
-    "similarity": 120,
+    "similarity": 20,
     "pca": 500,
     "umap": 500,
     "isomap": 500,
-    "dendro": 160,
+    "dendro": 20,
+}
+_MAX_PERSONA_COUNTS = {
+    "similarity": 100,
+    "dendro": 100,
 }
 _MAX_SIMILARITY_CELLS = 4_000_000
 _MAX_PAIR_TRAJECTORY_TRACES = 500
@@ -136,28 +140,38 @@ def _sequence_to_list(value: object) -> list[object] | None:
 
 
 _TRACKED_STATE_KEYS_KEY = "analysis:_tracked_state_keys"
+_FIGURE_STATE_ENTRIES = env_int("PERSONA_UI_FIGURE_STATE_ENTRIES", 2)
+_PREPARED_STATE_ENTRIES = env_int("PERSONA_UI_PREPARED_STATE_ENTRIES", 4)
 
 
-def _clear_old_load_states(current_key: str, suffix: str) -> None:
-    # Only one heavy figure state should live at a time. We track
-    # the keys we create per suffix so eviction is O(1) instead of scanning
-    # all of session_state on every rerun. Every such key is passed through
-    # this function before it is set, so the registry stays authoritative.
-    tracked: dict[str, set[str]] = st.session_state.setdefault(
+def _touch_load_state(current_key: str, suffix: str, *, max_entries: int) -> None:
+    # Keep a tiny MRU window of heavy state instead of scanning all of
+    # session_state or retaining every figure forever. This makes nearby
+    # method-switching feel warm while still giving RAM a hard ceiling.
+    tracked: dict[str, list[str]] = st.session_state.setdefault(
         _TRACKED_STATE_KEYS_KEY, {}
     )
-    for key in tracked.get(suffix, ()):
-        if key != current_key:
-            st.session_state.pop(key, None)
-    tracked[suffix] = {current_key}
+    keys = [key for key in tracked.get(suffix, []) if key != current_key]
+    keys.append(current_key)
+    while len(keys) > max(1, max_entries):
+        st.session_state.pop(keys.pop(0), None)
+    tracked[suffix] = keys
 
 
 def _clear_old_figure_states(current_key: str) -> None:
-    _clear_old_load_states(current_key, "_fig_state")
+    _touch_load_state(
+        current_key,
+        "_fig_state",
+        max_entries=_FIGURE_STATE_ENTRIES,
+    )
 
 
 def _clear_old_prepared_states(current_key: str) -> None:
-    _clear_old_load_states(current_key, "_projection_ready")
+    _touch_load_state(
+        current_key,
+        "_projection_ready",
+        max_entries=_PREPARED_STATE_ENTRIES,
+    )
 
 
 def _store_figure_state(key: str, value: object) -> None:

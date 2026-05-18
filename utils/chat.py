@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
@@ -185,6 +186,7 @@ def generate_chat_reply(
     top_k: int = 50,
     repetition_penalty: float = 1.0,
     seed: int | None = None,
+    on_status: Callable[[str, str, str], None] | None = None,
 ) -> ChatReply:
     """Generate one assistant reply from a full chat history.
 
@@ -228,9 +230,16 @@ def generate_chat_reply(
         generation_kwargs["repetition_penalty"] = repetition_penalty
     # `remote` is captured by nnsight's RemoteableMixin.trace() and is NOT
     # forwarded to the underlying model's generate
+    backend = _build_remote_backend(model, on_status) if remote else None
+
     with (
         _seeded_rng(seed if do_sample and not remote else None),
-        model.generate(prompt, remote=remote, **generation_kwargs) as tracer,
+        model.generate(
+            prompt,
+            remote=remote,
+            backend=backend,
+            **generation_kwargs,
+        ) as tracer,
     ):
         generated = tracer.result.save()
 
@@ -247,3 +256,34 @@ def generate_chat_reply(
         text=text,
         generated_ids=generated_ids.detach().cpu(),
     )
+
+
+def _build_remote_backend(
+    model: StandardizedTransformer,
+    on_status: Callable[[str, str, str], None] | None,
+):
+    """Build an NDIF backend that can surface lifecycle updates to callers."""
+
+    if on_status is None:
+        return None
+
+    from nnsight.intervention.backends.remote import JobStatusDisplay, RemoteBackend
+
+    class _CallbackJobStatusDisplay(JobStatusDisplay):
+        def update(
+            self,
+            job_id: str = "",
+            status_name: str = "",
+            description: str = "",
+        ):
+            super().update(job_id, status_name, description)
+            if status_name:
+                on_status(job_id, status_name, description)
+
+    backend = RemoteBackend(model.to_model_key())
+    backend.CONNECT_TIMEOUT = 300.0
+    backend.status_display = _CallbackJobStatusDisplay(
+        enabled=True,
+        verbose=backend.verbose,
+    )
+    return backend

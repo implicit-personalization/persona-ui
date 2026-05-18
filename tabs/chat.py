@@ -15,6 +15,8 @@ from tabs.chat_shared import (
     generate_chat_reply_result,
     hydrate_chat_state,
     load_chat_personas,
+    mark_model_loaded,
+    model_load_status,
     render_chat_selection,
 )
 from tabs.chat_ui import (
@@ -25,7 +27,7 @@ from tabs.chat_ui import (
 )
 from utils.chat import build_chat_messages, resolve_system_prompt
 from utils.chat_export import save_chat_export
-from utils.helpers import session_key, widget_key
+from utils.helpers import format_ndif_status, session_key, widget_key
 from utils.runtime import cached_model
 
 if TYPE_CHECKING:
@@ -94,9 +96,26 @@ def _handle_single_chat_generation(
     chat_log,
 ) -> None:
     messages = build_chat_messages(active_system_prompt, chat_state["messages"])
+    status_box = st.empty()
+
+    def _show_phase(text: str) -> None:
+        status_box.caption(text)
+
+    def _show_ndif_status(job_id: str, status_name: str, description: str) -> None:
+        status_box.caption(
+            format_ndif_status(
+                job_id,
+                status_name,
+                description,
+                completed_detail="Downloading result...",
+            )
+        )
 
     with st.spinner("Generating reply..."):
+        _show_phase(model_load_status(model_name))
         model = cached_model(model_name=model_name)
+        mark_model_loaded(model_name)
+        _show_phase("Submitting to NDIF..." if remote else "Generating locally...")
 
         def _show_error(exc: Exception) -> None:
             with chat_log:
@@ -108,15 +127,19 @@ def _handle_single_chat_generation(
             messages=messages,
             remote=remote,
             generation=generation,
+            on_status=_show_ndif_status if remote else None,
             on_error=_show_error,
         )
         if error is not None:
+            status_box.empty()
             if pending_action == "new_user_prompt" and chat_state["messages"]:
                 chat_state["messages"].pop()
             return
         if reply is None:
+            status_box.empty()
             return
 
+    status_box.empty()
     chat_state["messages"].append({"role": "assistant", "content": reply.text})
     st.rerun()
 

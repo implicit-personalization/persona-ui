@@ -11,43 +11,28 @@ is a thin Streamlit wrapper around them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-
 import streamlit as st
-from persona_data.environment import get_artifacts_dir
 from persona_vectors.analysis import LayeredSamples
 from persona_vectors.attributes import attribute_display_label
 from persona_vectors.extraction import MaskStrategy
 from persona_vectors.plots import plot_metric_comparison, plot_metric_over_layers
 from persona_vectors.probes import (
     AttributeLabels,
-    attribute_probe_labels,
     default_probe_kinds,
-    filter_attribute_samples_min_count,
     infer_probe_task,
     layer_matrix,
     save_probe_artifact,
     shuffle_label_baseline,
-    sweep_attribute,
 )
 
+from tabs.probe_sweep import SweepInputs, cached_sweep
 from utils.analysis_metadata import (
     synth_persona_attribute_names,
     synth_persona_dataset_cached,
 )
 from utils.analysis_sources import (
-    DEFAULT_COMPARE_MODEL,
-    DEFAULT_HUB_REPO,
-    SOURCE_HUB,
-    SOURCE_LOCAL,
-    SOURCES,
     Store,
-    activation_store_cached,
     available_variants,
-    hub_models_by_mask_strategy,
-    load_persona_vectors_cached,
-    local_model_options_cached,
     persona_names_cached,
     personas_cached,
     store_cache_parts,
@@ -55,6 +40,7 @@ from utils.analysis_sources import (
 )
 from utils.controls import render_mask_strategy_select
 from utils.helpers import widget_key
+from utils.source_controls import render_source_select, render_store_select
 
 # ---------------------------------------------------------------------------
 # Constants and config
@@ -78,94 +64,6 @@ _SECONDARY_METRIC = {
 }
 
 
-@dataclass(frozen=True)
-class _SweepInputs:
-    source: str
-    location: str
-    model_name: str
-    mask_value: str
-    variant: str
-    persona_ids: tuple[str, ...]
-    attributes: tuple[str, ...]
-    task: str
-    probe_kinds: tuple[str, ...]
-    n_pca_components: int | None
-    layers: tuple[int, ...]
-    min_class_count: int
-    seed: int
-
-
-# ---------------------------------------------------------------------------
-# Source / store selection (slim mirror of the analysis tab pattern)
-# ---------------------------------------------------------------------------
-
-
-def _select_source() -> str:
-    key = widget_key("probe", "source")
-    source = st.segmented_control(
-        "Source",
-        options=SOURCES,
-        default=st.session_state.get(key, SOURCE_HUB),
-        key=key,
-        label_visibility="collapsed",
-    )
-    return source or SOURCE_HUB
-
-
-def _select_store(source: str, mask_strategy: MaskStrategy) -> Store:
-    if source == SOURCE_HUB:
-        repo = st.text_input(
-            "Hub repo",
-            value=st.session_state.get("probe:hub_repo", DEFAULT_HUB_REPO),
-            key="probe:hub_repo",
-        )
-        models = hub_models_by_mask_strategy(repo).get(mask_strategy, [])
-        if not models:
-            st.warning(
-                f"No Hub vector configs for `{mask_strategy.value}` in `{repo}`."
-            )
-            model_name = st.text_input(
-                "Model",
-                value=st.session_state.get("probe:hub_model_fallback", DEFAULT_COMPARE_MODEL),
-                key="probe:hub_model_fallback",
-            )
-        else:
-            previous = st.session_state.get(
-                widget_key("probe", "hub_model", repo, mask_strategy.value),
-                models[0],
-            )
-            model_name = st.selectbox(
-                "Model",
-                options=models,
-                index=models.index(previous) if previous in models else 0,
-                key=widget_key("probe", "hub_model", repo, mask_strategy.value),
-            )
-        return activation_store_cached(SOURCE_HUB, repo, model_name, mask_strategy.value)
-
-    root = st.text_input(
-        "Artifacts root",
-        value=str(get_artifacts_dir() / "activations"),
-        key="probe:local_root",
-    )
-    root = str(Path(root).expanduser())
-    models = local_model_options_cached(root, mask_strategy.value)
-    if models:
-        previous = st.session_state.get("probe:local_model", models[0])
-        model_name = st.selectbox(
-            "Model",
-            options=models,
-            index=models.index(previous) if previous in models else 0,
-            key="probe:local_model",
-        )
-    else:
-        model_name = st.text_input(
-            "Model",
-            value=st.session_state.get("probe:local_model_fallback", DEFAULT_COMPARE_MODEL),
-            key="probe:local_model_fallback",
-        )
-    return activation_store_cached(SOURCE_LOCAL, root, model_name, mask_strategy.value)
-
-
 def _select_variant(store: Store, mask_strategy: MaskStrategy) -> str | None:
     variants = available_variants(store, mask_strategy)
     if not variants:
@@ -184,7 +82,9 @@ def _select_personas(
     store: Store, variant: str, mask_strategy: MaskStrategy
 ) -> list[str]:
     source, location, model_name = store_cache_parts(store)
-    all_ids = personas_cached(source, location, model_name, mask_strategy.value, (variant,))
+    all_ids = personas_cached(
+        source, location, model_name, mask_strategy.value, (variant,)
+    )
     if not all_ids:
         st.info("No personas found for this variant.")
         return []
@@ -225,7 +125,12 @@ def _select_personas(
     st.session_state["probe:persona_count"] = count
     persona_ids = regular[:count]
     persona_names_cached(
-        source, location, model_name, mask_strategy.value, (variant,), tuple(persona_ids)
+        source,
+        location,
+        model_name,
+        mask_strategy.value,
+        (variant,),
+        tuple(persona_ids),
     )
     st.caption(f"Probing {len(persona_ids)} of {len(regular)} non-assistant personas.")
     return persona_ids
@@ -323,13 +228,15 @@ def _select_layers(num_layers: int) -> list[int]:
     )
     if not fast:
         return list(range(num_layers))
-    return sorted({
-        0,
-        num_layers // 4,
-        num_layers // 2,
-        (3 * num_layers) // 4,
-        num_layers - 1,
-    })
+    return sorted(
+        {
+            0,
+            num_layers // 4,
+            num_layers // 2,
+            (3 * num_layers) // 4,
+            num_layers - 1,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -337,66 +244,12 @@ def _select_layers(num_layers: int) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
-@st.cache_resource(show_spinner=False)
-def _cached_sweep(
-    inputs: _SweepInputs,
-) -> tuple[
-    dict[str, list[dict[str, object]]],
-    dict[str, tuple[AttributeLabels, LayeredSamples]],
-]:
-    samples = load_persona_vectors_cached(
-        inputs.source, inputs.location, inputs.model_name,
-        inputs.mask_value, inputs.variant, inputs.persona_ids,
-    )
-    dataset = synth_persona_dataset_cached()
-    # The min-count filter drops personas per attribute, so each attribute keeps
-    # its own (labels, samples) pair for the downstream selectivity/save tools.
-    per_attr: dict[str, tuple[AttributeLabels, LayeredSamples]] = {}
-
-    def _labels_and_samples(attribute: str) -> tuple[AttributeLabels, LayeredSamples]:
-        if attribute not in per_attr:
-            labels = attribute_probe_labels(
-                dataset, attribute, list(inputs.persona_ids), task=inputs.task,  # type: ignore[arg-type]
-            )
-            probe_samples, labels = filter_attribute_samples_min_count(
-                samples, labels, min_count=inputs.min_class_count
-            )
-            per_attr[attribute] = (labels, probe_samples)
-        return per_attr[attribute]
-
-    def _sweep(attribute: str, n_pca: int | None) -> list[dict[str, object]]:
-        labels, probe_samples = _labels_and_samples(attribute)
-        return sweep_attribute(
-            probe_samples, labels,
-            layers=list(inputs.layers),
-            probe_kinds=list(inputs.probe_kinds),  # type: ignore[arg-type]
-            n_pca_components=n_pca,
-            seed=inputs.seed,
-        )
-
-    def _sweep_all(n_pca: int | None) -> list[dict[str, object]]:
-        rows: list[dict[str, object]] = []
-        for attribute in inputs.attributes:
-            rows.extend(_sweep(attribute, n_pca))
-        return rows
-
-    if inputs.n_pca_components is not None:
-        # Always overlay the compressed sweep against full activations.
-        rows_by_label = {
-            "full": _sweep_all(None),
-            f"pca{inputs.n_pca_components}": _sweep_all(inputs.n_pca_components),
-        }
-    else:
-        rows_by_label = {"full": _sweep_all(None)}
-    return rows_by_label, per_attr
-
-
 def _show_sweep(
     rows_by_label: dict[str, list[dict[str, object]]],
     per_attr: dict[str, tuple[AttributeLabels, LayeredSamples]],
     attributes: tuple[str, ...],
     task: str,
-    inputs: _SweepInputs,
+    inputs: SweepInputs,
 ) -> None:
     primary = _PRIMARY_METRIC[task]
     secondary = _SECONDARY_METRIC.get(task)
@@ -442,8 +295,7 @@ def _show_sweep(
         for label, label_rows in rows_by_label.items():
             for attribute in attributes:
                 attr_rows = [
-                    row for row in label_rows
-                    if row.get("attribute") == attribute
+                    row for row in label_rows if row.get("attribute") == attribute
                 ]
                 label_best = _best_row(attr_rows)
                 if label_best is None:
@@ -451,22 +303,23 @@ def _show_sweep(
                 summary_row: dict[str, object] = {}
                 if multi_attr:
                     summary_row["attribute"] = attribute
-                summary_row.update({
-                    "features": label,
-                    "best_layer": label_best["layer"],
-                    "probe": label_best["probe_kind"],
-                    primary: round(float(label_best[primary]), 3),
-                    f"baseline_{primary}": round(
-                        float(label_best.get(f"baseline_{primary}", float("nan"))), 3
-                    ),
-                })
+                summary_row.update(
+                    {
+                        "features": label,
+                        "best_layer": label_best["layer"],
+                        "probe": label_best["probe_kind"],
+                        primary: round(float(label_best[primary]), 3),
+                        f"baseline_{primary}": round(
+                            float(label_best.get(f"baseline_{primary}", float("nan"))),
+                            3,
+                        ),
+                    }
+                )
                 summary_rows.append(summary_row)
         if summary_rows:
             st.dataframe(summary_rows, width="stretch", hide_index=True)
 
-    feature_desc = (
-        f" · pca{inputs.n_pca_components}" if inputs.n_pca_components else ""
-    )
+    feature_desc = f" · pca{inputs.n_pca_components}" if inputs.n_pca_components else ""
 
     best_attr = str(best["attribute"])
     labels, samples = per_attr[best_attr]
@@ -495,7 +348,7 @@ def _render_selectivity_control(
     labels: AttributeLabels,
     samples: LayeredSamples,
     task: str,
-    inputs: _SweepInputs,
+    inputs: SweepInputs,
 ) -> None:
     if task == "numeric":
         return  # selectivity control is classification-only
@@ -507,14 +360,18 @@ def _render_selectivity_control(
             "dataset artifacts, not the property."
         )
         n_repeats = st.slider(
-            "Shuffle repeats", min_value=3, max_value=15, value=5,
+            "Shuffle repeats",
+            min_value=3,
+            max_value=15,
+            value=5,
             key="probe:shuffle_repeats",
         )
         if st.button("Run selectivity control", key="probe:run_shuffle"):
             with st.spinner("Running shuffled-label control..."):
                 X = layer_matrix(samples, int(best["layer"]))
                 shuffled = shuffle_label_baseline(
-                    X, labels.y,
+                    X,
+                    labels.y,
                     task=task,  # type: ignore[arg-type]
                     layer=int(best["layer"]),
                     probe_kind=best["probe_kind"],  # type: ignore[arg-type]
@@ -539,7 +396,7 @@ def _render_save_artifact(
     labels: AttributeLabels,
     samples: LayeredSamples,
     task: str,
-    inputs: _SweepInputs,
+    inputs: SweepInputs,
 ) -> None:
     def synced_default(key: str, default: str) -> str:
         default_key = f"{key}:default"
@@ -575,7 +432,9 @@ def _render_save_artifact(
         if st.button("Save", key="probe:save_artifact"):
             X = layer_matrix(samples, int(best["layer"]))
             directory = save_probe_artifact(
-                X=X, y=labels.y, labels=labels,
+                X=X,
+                y=labels.y,
+                labels=labels,
                 task=task,  # type: ignore[arg-type]
                 probe_kind=best["probe_kind"],  # type: ignore[arg-type]
                 n_pca_components=inputs.n_pca_components,
@@ -601,14 +460,21 @@ def _render_save_artifact(
 def render_probing_tab() -> None:
     st.title("Probing")
 
-    source = _select_source()
+    source = render_source_select(widget_scope="probe")
     with st.expander("Source", expanded=True):
         mask_strategy = render_mask_strategy_select(
             key=widget_key("probe", "mask_strategy"),
             last_key="probe:last_mask_strategy",
+            remember_key="source:last_mask_strategy",
             help_text="Which extracted activation set to load.",
         )
-        store = _select_store(source, mask_strategy)
+        store = render_store_select(
+            source,
+            mask_strategy,
+            state_prefix="probe",
+            widget_scope="probe",
+            artifacts_root_key="probe:local_root",
+        )
         variant = _select_variant(store, mask_strategy)
         if variant is None:
             return
@@ -644,13 +510,19 @@ def render_probing_tab() -> None:
         min_class_count = _MIN_CLASS_COUNT
         seed = 0
 
-    inputs = _SweepInputs(
-        source=source, location=location, model_name=model_name,
-        mask_value=mask_strategy.value, variant=variant,
-        persona_ids=tuple(persona_ids), attributes=tuple(attributes), task=task,
+    inputs = SweepInputs(
+        source=source,
+        location=location,
+        model_name=model_name,
+        mask_value=mask_strategy.value,
+        variant=variant,
+        persona_ids=tuple(persona_ids),
+        attributes=tuple(attributes),
+        task=task,
         probe_kinds=tuple(probe_kinds),
         n_pca_components=n_pca_components,
-        layers=tuple(layers), min_class_count=min_class_count,
+        layers=tuple(layers),
+        min_class_count=min_class_count,
         seed=int(seed),
     )
 
@@ -659,7 +531,7 @@ def render_probing_tab() -> None:
     if run:
         with st.spinner("Evaluating probes across layers..."):
             try:
-                sweep, per_attr = _cached_sweep(inputs)
+                sweep, per_attr = cached_sweep(inputs)
             except Exception as exc:
                 st.error(f"Sweep failed: {exc}")
                 st.session_state.pop(state_key, None)
@@ -674,6 +546,9 @@ def render_probing_tab() -> None:
         else:
             sweep, per_attr, result_inputs = saved_result
             _show_sweep(
-                sweep, per_attr, result_inputs.attributes,
-                result_inputs.task, result_inputs,
+                sweep,
+                per_attr,
+                result_inputs.attributes,
+                result_inputs.task,
+                result_inputs,
             )

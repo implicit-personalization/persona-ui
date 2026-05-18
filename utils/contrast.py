@@ -247,9 +247,7 @@ def render_contrast_html(result: TokenContrast) -> str:
     # those render as blank lines before the first word. Drop leading
     # whitespace-only tokens (and left-trim the first visible one) so the
     # contrast starts at real content. Display-only — weights stay aligned.
-    items = list(
-        zip(result.tokens, result.weights, result.raw_diffs, strict=True)
-    )
+    items = list(zip(result.tokens, result.weights, result.raw_diffs, strict=True))
     start = 0
     while start < len(items) and not items[start][0].strip():
         start += 1

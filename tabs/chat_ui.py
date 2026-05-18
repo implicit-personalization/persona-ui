@@ -16,6 +16,7 @@ from utils.helpers import (
 
 if TYPE_CHECKING:
     from persona_data.synth_persona import PersonaData
+
     from utils.contrast import TokenContrast
 
 GENERATION_DEFAULTS = {

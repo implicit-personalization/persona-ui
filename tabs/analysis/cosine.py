@@ -4,9 +4,6 @@ import streamlit as st
 from persona_vectors.extraction import MaskStrategy
 from persona_vectors.plots import plot_layer_similarity
 
-from utils.analysis_sources import Store, available_variants, store_id
-from utils.helpers import personas_fingerprint, prompt_variant_label, widget_key
-
 from tabs.analysis._shared import (
     _load_variant_vectors,
     _plotly_chart,
@@ -21,6 +18,8 @@ from tabs.analysis._state import (
     _filename,
     _store_figure_state,
 )
+from utils.analysis_sources import Store, available_variants, store_id
+from utils.helpers import personas_fingerprint, prompt_variant_label, widget_key
 
 
 def _render_cosine_selection(

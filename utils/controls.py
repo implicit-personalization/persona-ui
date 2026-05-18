@@ -7,8 +7,12 @@ def render_mask_strategy_select(
     key: str,
     last_key: str,
     help_text: str,
+    remember_key: str | None = None,
 ) -> MaskStrategy:
-    last_strategy = st.session_state.get(last_key, MaskStrategy.ANSWER_MEAN.value)
+    last_strategy = st.session_state.get(
+        remember_key,
+        st.session_state.get(last_key, MaskStrategy.ANSWER_MEAN.value),
+    )
     strategies = list(MaskStrategy)
     selected = st.selectbox(
         "Mask strategy",
@@ -26,4 +30,6 @@ def render_mask_strategy_select(
         help=help_text,
     )
     st.session_state[last_key] = selected.value
+    if remember_key is not None:
+        st.session_state[remember_key] = selected.value
     return selected

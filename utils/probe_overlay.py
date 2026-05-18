@@ -124,18 +124,14 @@ def build_regression_overlays(
     return overlays
 
 
-def attach_overlays(
-    messages: list[dict], overlays: list[ProbeOverlay]
-) -> None:
+def attach_overlays(messages: list[dict], overlays: list[ProbeOverlay]) -> None:
     """Attach one overlay to each assistant message, in order.
 
     Requires a 1:1 match. If the counts don't line up (e.g. the chat template
     doesn't mark assistant tokens), clear overlays so the caller can show a
     clear status instead of painting the wrong message.
     """
-    assistant_idxs = [
-        i for i, m in enumerate(messages) if m.get("role") == "assistant"
-    ]
+    assistant_idxs = [i for i, m in enumerate(messages) if m.get("role") == "assistant"]
     clear_overlays(messages)
     if not assistant_idxs or len(overlays) != len(assistant_idxs):
         return
@@ -189,8 +185,7 @@ def _tooltip(probs_row: list[float], labels: list[str | None]) -> str:
         # Single-output sigmoid: synthesize the complementary class so the
         # hover shows both label probabilities, not just one.
         return escape(
-            f"{positive_label} {positive:.2f} · "
-            f"not {positive_label} {1 - positive:.2f}"
+            f"{positive_label} {positive:.2f} · not {positive_label} {1 - positive:.2f}"
         )
     ranked = sorted(enumerate(probs_row), key=lambda item: item[1], reverse=True)
     parts = [f"{_label_for(labels, idx)} {prob:.2f}" for idx, prob in ranked]

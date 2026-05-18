@@ -64,6 +64,26 @@ NDIF_STATUS_ICONS = {
 }
 
 
+def format_ndif_status(
+    job_id: str,
+    status_name: str,
+    description: str,
+    *,
+    prefix: str | None = None,
+    completed_detail: str | None = None,
+) -> str:
+    """Build the shared one-line NDIF status label used across the UI."""
+
+    icon = NDIF_STATUS_ICONS.get(status_name, "•")
+    detail = (
+        completed_detail
+        if completed_detail is not None and status_name == "COMPLETED"
+        else description
+    )
+    label = f"{icon} `{job_id}` **{status_name}** — {detail}"
+    return f"{prefix}: {label}" if prefix else label
+
+
 def slugify(value: str) -> str:
     """Convert a string to a filesystem-safe slug."""
 

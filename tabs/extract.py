@@ -20,7 +20,7 @@ from utils.datasets import (
     warm_qa_in_background,
 )
 from utils.helpers import (
-    NDIF_STATUS_ICONS,
+    format_ndif_status,
     persona_label,
     prompt_variant_label,
     session_key,
@@ -353,8 +353,7 @@ def _run_extraction_plan(
     ndif_status_box = st.empty()
 
     def _on_ndif_status(job_id: str, status_name: str, description: str) -> None:
-        icon = NDIF_STATUS_ICONS.get(status_name, "•")
-        ndif_status_box.caption(f"{icon} `{job_id}` **{status_name}** — {description}")
+        ndif_status_box.caption(format_ndif_status(job_id, status_name, description))
 
     with st.spinner("Loading model..."):
         model = cached_model(model_name=model_name)

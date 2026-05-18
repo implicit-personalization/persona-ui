@@ -7,6 +7,7 @@ from tempfile import mkdtemp
 from typing import Any
 
 import streamlit as st
+from huggingface_hub import hf_hub_download, list_repo_files, try_to_load_from_cache
 from persona_data.nemotron_personas import (
     NemotronPersonasFranceDataset,
     NemotronPersonasUSADataset,
@@ -15,6 +16,17 @@ from persona_data.synth_persona import PersonaDataset as LocalPersonaDataset
 from persona_data.synth_persona import SynthPersonaDataset
 
 from .helpers import DatasetSource
+
+_SYNTH_PERSONA_REPO = "implicit-personalization/synth-persona"
+_SYNTH_PERSONA_STARTUP_FILES = (
+    "implicit_shared_mc_bank.json",
+    "dataset_personas.jsonl",
+)
+_SYNTH_PERSONA_QA_FILE = "dataset_qa.jsonl"
+_NEMOTRON_REPOS = {
+    DatasetSource.NEMOTRON_FRANCE.value: "nvidia/Nemotron-Personas-France",
+    DatasetSource.NEMOTRON_USA.value: "nvidia/Nemotron-Personas-USA",
+}
 
 
 @st.cache_resource(show_spinner=False)
@@ -39,13 +51,19 @@ def warm_qa_in_background(dataset: Any) -> None:
     warm = getattr(dataset, "prefetch_qa", None)
     if warm is None:
         return  # persona-only dataset (e.g. Nemotron) has no QA
+    if isinstance(dataset, SynthPersonaDataset):
+        # Extract will need QA soon. Make the one-time large transfer explicit,
+        # then leave the CPU-heavy parse on the existing background thread.
+        _download_missing_startup_files_if_needed(
+            _SYNTH_PERSONA_REPO,
+            (_SYNTH_PERSONA_QA_FILE,),
+            "SynthPersona QA",
+        )
     with _qa_warm_lock:
         if getattr(dataset, "_qa_warm_started", False):
             return
         dataset._qa_warm_started = True
-    threading.Thread(
-        target=warm, name="persona-ui-warm-qa", daemon=True
-    ).start()
+    threading.Thread(target=warm, name="persona-ui-warm-qa", daemon=True).start()
 
 
 @st.cache_resource(show_spinner=False)
@@ -118,12 +136,19 @@ def load_dataset(
     """Load the selected dataset source for the UI."""
 
     if dataset_source == DatasetSource.SYNTH_PERSONA.value:
+        _download_missing_startup_files_if_needed(
+            _SYNTH_PERSONA_REPO,
+            _SYNTH_PERSONA_STARTUP_FILES,
+            "SynthPersona",
+        )
         return _cached_dataset(SynthPersonaDataset), "SynthPersona"
 
     if dataset_source == DatasetSource.NEMOTRON_FRANCE.value:
+        _prepare_nemotron_startup_download(dataset_source, "Nemotron France")
         return _cached_dataset(NemotronPersonasFranceDataset), "Nemotron France"
 
     if dataset_source == DatasetSource.NEMOTRON_USA.value:
+        _prepare_nemotron_startup_download(dataset_source, "Nemotron USA")
         return _cached_dataset(NemotronPersonasUSADataset), "Nemotron USA"
 
     if personas_file is None or qa_file is None:
@@ -132,3 +157,60 @@ def load_dataset(
     personas_path = _uploaded_file_to_temp_path(personas_file, stem="personas")
     qa_path = _uploaded_file_to_temp_path(qa_file, stem="qa")
     return _cached_local_dataset(str(personas_path), str(qa_path)), "Local upload"
+
+
+def _is_cached(repo_id: str, filename: str) -> bool:
+    """Return whether a Hub dataset file already exists in the local HF cache."""
+
+    cached = try_to_load_from_cache(repo_id, filename, repo_type="dataset")
+    return isinstance(cached, str)
+
+
+def _download_missing_startup_files_if_needed(
+    repo_id: str,
+    filenames: tuple[str, ...],
+    label: str,
+) -> None:
+    """Make first-time Hub downloads visible before dataset construction blocks.
+
+    Hugging Face handles byte-level transfer internally. We expose file-level
+    progress here, which is the useful unit this UI can know in advance.
+    """
+
+    missing = tuple(
+        filename for filename in filenames if not _is_cached(repo_id, filename)
+    )
+    if not missing:
+        return
+
+    st.warning(
+        f"First-time setup for {label}: downloading dataset files from Hugging Face. "
+        "Later loads should use the local cache."
+    )
+    progress = st.progress(0.0, text=f"Preparing {label} download…")
+    total = len(missing)
+    for index, filename in enumerate(missing, start=1):
+        progress.progress(
+            (index - 1) / total,
+            text=f"Downloading {filename} ({index}/{total})",
+        )
+        hf_hub_download(repo_id, filename, repo_type="dataset")
+        progress.progress(
+            index / total,
+            text=f"Downloaded {filename} ({index}/{total})",
+        )
+
+
+def _prepare_nemotron_startup_download(dataset_source: str, label: str) -> None:
+    """Prefetch the first parquet shard used by the default Nemotron sample."""
+
+    repo_id = _NEMOTRON_REPOS[dataset_source]
+    parquet_files = tuple(
+        sorted(
+            filename
+            for filename in list_repo_files(repo_id, repo_type="dataset")
+            if filename.startswith("data/train-") and filename.endswith(".parquet")
+        )
+    )
+    if parquet_files:
+        _download_missing_startup_files_if_needed(repo_id, (parquet_files[0],), label)

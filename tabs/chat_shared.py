@@ -23,6 +23,9 @@ class ChatSelection:
     changed: bool
 
 
+_LOADED_MODEL_NAMES_KEY = session_key("chat", "loaded_model_names")
+
+
 def load_chat_personas(dataset_source: str) -> list[PersonaData] | None:
     personas_file_key = session_key("extract", "personas_file")
     qa_file_key = session_key("extract", "qa_file")
@@ -84,12 +87,27 @@ def render_chat_selection(
     return ChatSelection(selected_persona, prompt_mode, changed)
 
 
+def model_load_status(model_name: str) -> str:
+    """Return an honest coarse-grained loading label for the current session."""
+
+    loaded_names = st.session_state.setdefault(_LOADED_MODEL_NAMES_KEY, set())
+    return "Using cached model..." if model_name in loaded_names else "Loading model..."
+
+
+def mark_model_loaded(model_name: str) -> None:
+    """Remember that this session has already requested a model once."""
+
+    loaded_names = st.session_state.setdefault(_LOADED_MODEL_NAMES_KEY, set())
+    loaded_names.add(model_name)
+
+
 def generate_chat_reply_result(
     *,
     model: object,
     messages: list[dict[str, str]],
     remote: bool,
     generation: GenerationConfig,
+    on_status: Callable[[str, str, str], None] | None = None,
     on_error: Callable[[Exception], None] | None = None,
 ) -> tuple[ChatReply | None, Exception | None]:
     try:
@@ -98,6 +116,7 @@ def generate_chat_reply_result(
                 model=model,
                 messages=messages,
                 remote=remote,
+                on_status=on_status,
                 **generation.to_generate_kwargs(),
             ),
             None,
