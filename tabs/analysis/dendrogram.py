@@ -1,3 +1,4 @@
+import gc
 from copy import deepcopy
 
 import plotly.graph_objects as go
@@ -10,7 +11,6 @@ from tabs.analysis._shared import (
     _load_persona_options,
     _load_variant_vectors,
     _plotly_chart,
-    _release_vector_memory,
     _render_layer_frame_controls,
     _render_persona_select_controls,
     _render_save_buttons,
@@ -311,16 +311,11 @@ def _render_dendrogram_analysis(
             st.error(f"Could not build dendrogram: {exc}")
             st.session_state.pop(fig_key, None)
         finally:
-            _release_vector_memory()
+            gc.collect()
             progress.empty()
 
     if fig_key in st.session_state:
         saved = st.session_state[fig_key]
-        if len(saved) == 5:
-            # Drop pre-refactor state so hot-reloaded sessions do not unpack the
-            # old two-figure payload shape.
-            st.session_state.pop(fig_key, None)
-            return
         fig_a, fig_b, comparison_fig, n_personas, va, vb = saved
         if comparison_fig is not None:
             _plotly_chart(comparison_fig)

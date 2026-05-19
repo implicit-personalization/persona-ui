@@ -1,3 +1,4 @@
+import gc
 from itertools import combinations
 
 import streamlit as st
@@ -7,7 +8,6 @@ from persona_vectors.plots import plot_layer_similarity
 from tabs.analysis._shared import (
     _load_variant_vectors,
     _plotly_chart,
-    _release_vector_memory,
     _render_save_buttons,
     _select_artifact_personas,
 )
@@ -199,7 +199,7 @@ def _render_cosine_similarity(
             _store_figure_state(cosine_fig_key, figures)
             progress.progress(100, text="Done.")
         finally:
-            _release_vector_memory()
+            gc.collect()
             progress.empty()
 
     if cosine_fig_key in st.session_state:

@@ -1,5 +1,3 @@
-import gc
-
 import plotly.graph_objects as go
 import streamlit as st
 from persona_data.synth_persona import BASELINE_PERSONA_ID
@@ -114,10 +112,6 @@ def _load_variant_vectors(
         tuple(variants),
         tuple(persona_ids),
     )
-
-
-def _release_vector_memory() -> None:
-    gc.collect()
 
 
 def _evenly_spaced_layers(layers: list[int], max_count: int) -> list[int]:

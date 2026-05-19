@@ -1,3 +1,4 @@
+import gc
 from collections.abc import Callable
 
 import plotly.graph_objects as go
@@ -14,7 +15,6 @@ from tabs.analysis._shared import (
     _gray_out_unselected_personas,
     _load_persona_vectors,
     _plotly_chart,
-    _release_vector_memory,
     _render_save_buttons,
     _select_single_variant_samples,
 )
@@ -564,7 +564,7 @@ def _render_layered_figure_analysis(
             st.error(f"Could not build figure: {exc}")
             st.session_state.pop(state_keys.figure, None)
         finally:
-            _release_vector_memory()
+            gc.collect()
             progress.empty()
 
     if state_keys.figure in st.session_state:

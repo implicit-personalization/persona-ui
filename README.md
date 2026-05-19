@@ -12,9 +12,6 @@ pinned: false
 
 Streamlit interface for persona vector extraction, analysis, and chat.
 
-> [!WARNING]
-> This is a proof-of-concept UI, mostly vibe-coded. It will likely be replaced by a proper frontend/backend in the future.
-
 ## Overview
 
 A web app built on top of [persona-vectors](../persona-vectors) that provides these tabs:
@@ -32,11 +29,16 @@ persona-ui/
 ├── state.py                 # Session state management (chat history, KV cache)
 ├── tabs/
 │   ├── chat.py / chat_ui.py / chat_shared.py  # Chat tab
-│   ├── analysis_core.py                       # Analysis tab (cosine sim, PCA, UMAP, Isomap, dendrogram)
 │   ├── compare_chat.py      # Side-by-side chat comparison mode
+│   ├── analysis_core.py     # Analysis tab entry point
+│   ├── analysis/            # Analysis tab internals
+│   │   ├── _shared.py / _state.py            # Shared loading + session state
+│   │   ├── cosine.py        # Cosine similarity view
+│   │   ├── dendrogram.py    # Persona dendrograms
+│   │   └── layered.py       # PCA/UMAP/Isomap projections
 │   ├── extract.py           # Extraction tab
-│   ├── probe.py             # Probe sweep + diagnostics tab
-│   └── probe_ui.py          # Probe upload and tracing controls
+│   ├── probe.py / probe_ui.py  # Probe diagnostics + upload/tracing controls
+│   └── probe_sweep.py       # Probe sweep tab
 └── utils/
     ├── analysis_sources.py  # Local + Hub persona-vector store wiring
     ├── chat.py              # Chat generation logic
@@ -46,13 +48,13 @@ persona-ui/
     ├── helpers.py           # UI labels and slug helpers
     ├── probe_trace.py       # Chat-token activation tracing
     ├── probe_overlay.py     # Per-token probe-score overlay
-    ├── probes.py            # Probe loading and scoring
+    ├── probes.py / probe_files.py  # Probe loading, scoring, artifact paths
+    ├── preload.py           # Background startup warmup
     └── runtime.py           # Model caching and NDIF queries
 ```
 
-Dataset loading and environment helpers are provided by the sibling
-[persona-data](../persona-data) package. Core extraction, analysis, and
-steering logic comes from [persona-vectors](../persona-vectors).
+Dataset loading and environment helpers are provided by the sibling [persona-data](https://github.com/implicit-personalization/persona-data) package. 
+Core extraction, analysis, and steering logic comes from [persona-vectors](https://github.com/implicit-personalization/persona-vectors).
 
 ## Installation
 
@@ -64,8 +66,7 @@ cp .env.example .env
 ## Local Development
 
 The checked-in dependency config uses published packages. For local package
-work, uncomment the `tool.uv.sources` block in `pyproject.toml` and keep sibling
-checkouts next to this repo.
+work, uncomment the `tool.uv.sources` block in `pyproject.toml` and keep sibling checkouts next to this repo.
 
 Example:
 
@@ -93,13 +94,7 @@ streamlit run app.py
 
 This app can be deployed to Hugging Face Spaces using Docker.
 
-### Prerequisites
-
-Dependencies are published on PyPI, so deployment does not require sibling
-checkouts. Remote NDIF execution still needs an API key, either configured as an
-environment variable or entered by each user in the sidebar.
-
-### Build Locally (Optional)
+### Build Locally
 
 ```bash
 docker build -t persona-ui .
@@ -114,17 +109,19 @@ Copy `.env.example` to `.env` and fill in:
 ```bash
 NDIF_API_KEY=...       # Optional shared NDIF key; users can also enter one per session
 HF_HOME=...            # Optional: HuggingFace cache directory
+HF_TOKEN=...           # Optional: higher Hugging Face Hub rate limits; public datasets do not require it
 ARTIFACTS_DIR=...      # Optional: where persona vectors are read from (default: ./artifacts)
 PERSONA_VECTORS_HUB_REPO=...  # Optional: default Analysis/Probing Hub dataset repo
+PERSONA_UI_STORE_CACHE_ENTRIES=4      # Optional: open local/Hub vector stores kept warm
 PERSONA_UI_VECTOR_CACHE_ENTRIES=4     # Optional: loaded analysis datasets kept warm
 PERSONA_UI_PREPARED_CACHE_ENTRIES=8   # Optional: prepared projections / k-means groups kept warm
 PERSONA_UI_FIGURE_STATE_ENTRIES=2     # Optional: recent rendered Analysis figures kept in-session
 PERSONA_UI_PREPARED_STATE_ENTRIES=4   # Optional: recent projection-ready markers kept in-session
 ```
 
-The app picks up this file automatically via `load_dotenv()` on startup. If
-`NDIF_API_KEY` is unset, Chat and Extract users are prompted for a per-session
-key when they need remote execution.
+The app picks up `.env` automatically via `load_dotenv()` on startup, and hosted
+environments such as Hugging Face Spaces can provide the same values as
+environment variables. If `NDIF_API_KEY` is unset, Chat and Extract users are prompted for a per-session key when they need remote execution.
 
 ## Persona Vectors
 
@@ -142,19 +139,6 @@ artifacts/
     └── <export>.json
 ```
 
-`<model_dir>` is the model name with `/` replaced by `__` (e.g.
-`google__gemma-2-9b-it`). The manifest stores persona names, tensor shape
-metadata, and sample ids. Chat exports still store `dataset_source` in the
-JSON payload.
-
-The all-questions extraction script (`persona-vectors/scripts/extraction_all_questions.sh`)
-writes to `artifacts/persona-vectors/` instead of `artifacts/activations/`,
-so all-questions and train-split runs can coexist; point `ARTIFACTS_DIR` (or
-the Analysis/Probing tab's Local source path) at the tree you want to load.
-
-The store classes are `PersonaVectorStore` (local) and `HFPersonaVectorStore`
-(Hub) — same API, both imported by `utils/analysis_sources.py`.
-
-## Analysis responsiveness
-
-The Analysis tab keeps small bounded caches of loaded vector datasets, prepared projection data, and a tiny MRU window of rendered figures. Once a projection has been computed, recoloring it by persona, attribute, or k-means group reuses the same coordinates; nearby method switches can reuse the last couple of figures instead of rebuilding immediately, while the caps keep RAM bounded. Tune `PERSONA_UI_VECTOR_CACHE_ENTRIES` if RAM is tight or you regularly switch among many selections, `PERSONA_UI_PREPARED_CACHE_ENTRIES` if you revisit several projection configurations in one session, and `PERSONA_UI_FIGURE_STATE_ENTRIES` if you want more or less method-switch warmth. Probe loading, probe sweeps, and per-trace probe outputs are bounded separately via `PERSONA_UI_PROBE_CACHE_ENTRIES`, `PERSONA_UI_PROBE_SWEEP_CACHE_ENTRIES`, and `PERSONA_UI_PROBE_DERIVED_CACHE_ENTRIES`; the derived-output cache defaults to a wider MRU window because those tensors are small compared with traced activations and are cheap wins to keep warm.
+`<model_dir>` is the model name with `/` replaced by `__` (e.g. `google__gemma-2-9b-it`). 
+The manifest stores persona names, tensor shape metadata, and sample ids. 
+Chat exports still store `dataset_source` in the JSON payload.
