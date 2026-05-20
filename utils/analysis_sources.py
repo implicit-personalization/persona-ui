@@ -244,30 +244,24 @@ def projection_data_cached(
     layers: tuple[int, ...],
     kind: str,
     n_components: int,
+    normalize: bool,
     graph_overlay: bool,
     graph_n_neighbors: int,
 ) -> LayeredProjectionData:
     samples = load_persona_vectors_cached(
         source, location, model_name, mask_strategy_value, variant, persona_ids
     )
-    if kind == "umap":
-        with _UMAP_PROJECTION_LOCK:
-            return prepare_layered_projection_data(
-                samples,
-                kind,
-                layers=list(layers),
-                n_components=n_components,
-                graph_overlay=graph_overlay,
-                graph_n_neighbors=graph_n_neighbors,
-            )
-    return prepare_layered_projection_data(
-        samples,
-        kind,
+    kwargs = dict(
         layers=list(layers),
         n_components=n_components,
+        normalize=normalize,
         graph_overlay=graph_overlay,
         graph_n_neighbors=graph_n_neighbors,
     )
+    if kind == "umap":
+        with _UMAP_PROJECTION_LOCK:
+            return prepare_layered_projection_data(samples, kind, **kwargs)
+    return prepare_layered_projection_data(samples, kind, **kwargs)
 
 
 @st.cache_resource(show_spinner=False, max_entries=_PREPARED_CACHE_ENTRIES)

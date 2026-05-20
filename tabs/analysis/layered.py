@@ -26,6 +26,7 @@ from tabs.analysis._state import (
     _LAST_PROJECTION_CLUSTER_MODE_KEY,
     _LAST_PROJECTION_COLOR_MODE_KEY,
     _LAST_PROJECTION_HIGHLIGHTS_KEY,
+    _LAST_PROJECTION_NORMALIZE_KEY,
     _LAST_PROJECTION_PERSONAS_KEY,
     _LAST_PROJECTION_VARIANT_KEY,
     _LAST_SIMILARITY_VARIANT_KEY,
@@ -231,6 +232,21 @@ def _render_projection_color_config(
     )
 
 
+def _render_projection_normalize_control(scope: str, store: Store) -> bool:
+    key = widget_key("load", "projection_normalize", scope, store_id(store))
+    if key not in st.session_state:
+        st.session_state[key] = bool(
+            st.session_state.get(_LAST_PROJECTION_NORMALIZE_KEY, True)
+        )
+    normalize = st.checkbox(
+        "Normalize vectors",
+        key=key,
+        help=("Center and L2-normalize persona vectors before PCA/UMAP projection."),
+    )
+    st.session_state[_LAST_PROJECTION_NORMALIZE_KEY] = normalize
+    return normalize
+
+
 def _layered_figure_state_keys(
     store: Store,
     mask_strategy: MaskStrategy,
@@ -238,6 +254,7 @@ def _layered_figure_state_keys(
     scope: str,
     figure_kind: str,
     n_components: int,
+    projection_normalize: bool,
     color_config: ProjectionColorConfig,
     variant: str,
     persona_key: str,
@@ -253,6 +270,7 @@ def _layered_figure_state_keys(
         mask_strategy.value,
         figure_kind,
         str(n_components),
+        str(projection_normalize),
         color_config.color_mode,
         str(color_config.attribute_name),
         str(color_config.n_clusters),
@@ -274,6 +292,7 @@ def _layered_figure_state_keys(
         mask_strategy.value,
         figure_kind,
         str(n_components),
+        str(projection_normalize),
         str(figure_kind == "isomap"),
         str(_DEFAULT_GRAPH_NEIGHBORS),
         variant,
@@ -291,6 +310,7 @@ def _projection_build_kwargs(
     figure_kind: str,
     selected_layers: list[int],
     n_components: int,
+    projection_normalize: bool,
     color_config: ProjectionColorConfig,
     persona_ids: list[str],
     persona_names: dict[str, str],
@@ -301,6 +321,7 @@ def _projection_build_kwargs(
     graph_overlay = figure_kind == "isomap"
     build_kwargs = {
         "n_components": n_components,
+        "projection_normalize": projection_normalize,
         "graph_overlay": graph_overlay,
         "graph_n_neighbors": _DEFAULT_GRAPH_NEIGHBORS,
     }
@@ -318,6 +339,7 @@ def _projection_build_kwargs(
         *cache_args,
         figure_kind,
         n_components,
+        projection_normalize,
         graph_overlay,
         _DEFAULT_GRAPH_NEIGHBORS,
     )
@@ -484,6 +506,12 @@ def _render_layered_figure_analysis(
         color_config = _render_projection_color_config(store, scope, persona_ids)
         if color_config is None:
             return
+    if figure_kind in {"pca", "umap"}:
+        projection_normalize = _render_projection_normalize_control(scope, store)
+    elif figure_kind in _PROJECTION_KINDS:
+        projection_normalize = True
+    else:
+        projection_normalize = False
 
     state_keys = _layered_figure_state_keys(
         store,
@@ -491,6 +519,7 @@ def _render_layered_figure_analysis(
         scope=scope,
         figure_kind=figure_kind,
         n_components=n_components,
+        projection_normalize=projection_normalize,
         color_config=color_config,
         variant=variant,
         persona_key=persona_key,
@@ -534,6 +563,7 @@ def _render_layered_figure_analysis(
                 figure_kind=figure_kind,
                 selected_layers=selected_layers,
                 n_components=n_components,
+                projection_normalize=projection_normalize,
                 color_config=color_config,
                 persona_ids=persona_ids,
                 persona_names=persona_names,

@@ -26,6 +26,7 @@ _LAST_PROJECTION_CLUSTER_K_KEY = "analysis:last_projection_cluster_k"
 _LAST_PROJECTION_CLUSTER_MODE_KEY = "analysis:last_projection_cluster_mode"
 _LAST_PROJECTION_HIGHLIGHTS_KEY = "analysis:last_projection_highlights"
 _LAST_PROJECTION_DIMS_KEY = "analysis:last_projection_dims"
+_LAST_PROJECTION_NORMALIZE_KEY = "analysis:last_projection_normalize"
 _LAST_LAYER_FRAMES_KEY = "analysis:last_layer_frames"
 
 _DEFAULT_LAYER_FRAMES = 16
