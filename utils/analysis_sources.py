@@ -1,4 +1,5 @@
 import os
+import threading
 from contextlib import contextmanager
 
 import streamlit as st
@@ -38,6 +39,7 @@ SOURCES = (SOURCE_HUB, SOURCE_LOCAL)
 _STORE_CACHE_ENTRIES = env_int("PERSONA_UI_STORE_CACHE_ENTRIES", 4)
 _VECTOR_CACHE_ENTRIES = env_int("PERSONA_UI_VECTOR_CACHE_ENTRIES", 4)
 _PREPARED_CACHE_ENTRIES = env_int("PERSONA_UI_PREPARED_CACHE_ENTRIES", 8)
+_UMAP_PROJECTION_LOCK = threading.Lock()
 
 
 def _hub_variants_pending(store: Store, variants: tuple[str, ...]) -> tuple[str, ...]:
@@ -248,6 +250,16 @@ def projection_data_cached(
     samples = load_persona_vectors_cached(
         source, location, model_name, mask_strategy_value, variant, persona_ids
     )
+    if kind == "umap":
+        with _UMAP_PROJECTION_LOCK:
+            return prepare_layered_projection_data(
+                samples,
+                kind,
+                layers=list(layers),
+                n_components=n_components,
+                graph_overlay=graph_overlay,
+                graph_n_neighbors=graph_n_neighbors,
+            )
     return prepare_layered_projection_data(
         samples,
         kind,
