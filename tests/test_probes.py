@@ -1,12 +1,10 @@
 """Regression tests for utils.probes.
 
 Covers the probe-artifact filename parser (both naming conventions) and the
-two correctness fixes:
+correctness fix:
 
 * ``_normalize_batch`` applies PCA independently of the scaler (previously the
   PCA branch was unreachable when no scaler was present).
-* ``LoadedProbe.run`` predicts class 1 for a single-output probe whose sigmoid
-  score is >= 0.5 (previously it always predicted class 0).
 """
 
 import pytest
@@ -163,41 +161,6 @@ def test_normalize_batch_pca_shape_mismatch_raises():
 
 
 # --------------------------------------------------------------------------- #
-# LoadedProbe.run — single-output prediction
-# --------------------------------------------------------------------------- #
-
-
-def _single_output_probe(weight: list[float], bias: float) -> LoadedProbe:
-    model = _LinearProbe(input_dim=len(weight), num_classes=1)
-    with torch.no_grad():
-        model.linear.weight.copy_(torch.tensor([weight]))
-        model.linear.bias.copy_(torch.tensor([bias]))
-    return LoadedProbe(
-        model=model,
-        input_dim=len(weight),
-        labels=["neg", "pos"],
-        model_type="linear",
-        layer=0,
-        location=None,
-    )
-
-
-def test_run_single_output_predicts_positive_when_score_high():
-    """Regression: single-output probe must predict class 1 when sigmoid >= 0.5."""
-    probe = _single_output_probe(weight=[1.0, 1.0], bias=5.0)
-    result = probe.run(torch.tensor([1.0, 1.0]))
-    assert result.predicted_index == 1
-    assert result.predicted_label == "pos"
-
-
-def test_run_single_output_predicts_negative_when_score_low():
-    probe = _single_output_probe(weight=[1.0, 1.0], bias=-5.0)
-    result = probe.run(torch.tensor([1.0, 1.0]))
-    assert result.predicted_index == 0
-    assert result.predicted_label == "neg"
-
-
-# --------------------------------------------------------------------------- #
 # canonical persona-vectors artifacts
 # --------------------------------------------------------------------------- #
 
@@ -224,4 +187,5 @@ def test_loaded_probe_from_canonical_artifact():
     )
     assert probe.labels == ["neg", "pos"]
     assert probe.layer == 3
-    assert probe.run(torch.tensor([1.0, 0.0])).predicted_label == "pos"
+    _, _, predicted = probe.run_batch(torch.tensor([[1.0, 0.0]]))
+    assert probe.labels[int(predicted[0])] == "pos"

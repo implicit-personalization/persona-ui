@@ -58,7 +58,6 @@ def trace_conversation(
         model.tokenizer,
         add_generation_prompt=False,
     )
-    assistant_mask_seq = _compute_assistant_mask(model.tokenizer, messages)
     prompt_hash = hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
     cache_key = _trace_cache_key(
         model_name=model_name,
@@ -70,6 +69,8 @@ def trace_conversation(
     cached = _get_cached_trace(cache_key)
     if cached is not None:
         return cached
+
+    assistant_mask_seq = _compute_assistant_mask(model.tokenizer, messages)
 
     accessor = _select_accessor(model, location)
     if remote:
@@ -199,19 +200,15 @@ def _drop_derived_results_for_trace(cache_key: str) -> None:
         f"probe_values::{cache_key}::",
     )
     tracked = st.session_state.get(_DERIVED_CACHE_TRACKER_KEY)
-    if isinstance(tracked, list):
-        kept: list[str] = []
-        for key in tracked:
-            if isinstance(key, str) and key.startswith(prefixes):
-                st.session_state.pop(key, None)
-            else:
-                kept.append(key)
-        st.session_state[_DERIVED_CACHE_TRACKER_KEY] = kept
+    if not isinstance(tracked, list):
         return
-
-    for key in list(st.session_state):
+    kept: list[str] = []
+    for key in tracked:
         if isinstance(key, str) and key.startswith(prefixes):
             st.session_state.pop(key, None)
+        else:
+            kept.append(key)
+    st.session_state[_DERIVED_CACHE_TRACKER_KEY] = kept
 
 
 def _compute_assistant_mask(
@@ -395,10 +392,7 @@ def _assistant_spans(
 
 
 def _special_token_mask(tokenizer: object, input_ids: torch.Tensor) -> torch.Tensor:
-    special_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
+    special_ids = sorted(getattr(tokenizer, "all_special_ids", []) or [])
     if not special_ids:
         return torch.zeros(int(input_ids.shape[0]), dtype=torch.bool)
-    return torch.tensor(
-        [int(token_id) in special_ids for token_id in input_ids.tolist()],
-        dtype=torch.bool,
-    )
+    return torch.isin(input_ids.cpu(), torch.tensor(special_ids, dtype=input_ids.dtype))

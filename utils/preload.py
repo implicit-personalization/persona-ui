@@ -82,4 +82,13 @@ def preload_once(
         name=f"persona-ui-preload-{name}",
         daemon=True,
     )
+    # Attach this Streamlit script's run context so calls into ``@st.cache_*``
+    # functions land in the right session instead of emitting a
+    # "missing ScriptRunContext" warning per call.
+    try:
+        from streamlit.runtime.scriptrunner import add_script_run_ctx
+
+        add_script_run_ctx(thread)
+    except Exception:
+        logger.debug("Could not attach script run context to preload thread")
     thread.start()

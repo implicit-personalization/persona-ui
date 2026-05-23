@@ -21,15 +21,6 @@ from utils.probe_files import (
 _PROBE_CACHE_ENTRIES = env_int("PERSONA_UI_PROBE_CACHE_ENTRIES", 8)
 
 
-@dataclass(frozen=True)
-class ProbeRunResult:
-    input_dim: int
-    logits: torch.Tensor
-    probabilities: torch.Tensor
-    predicted_index: int
-    predicted_label: str | None
-
-
 class _LinearProbe(nn.Module):
     def __init__(self, input_dim: int, num_classes: int):
         super().__init__()
@@ -85,6 +76,15 @@ class LoadedProbe:
 
     def __post_init__(self) -> None:
         self.model.eval()
+        # Cast normalization tensors once so per-forward calls don't redo it.
+        if self.scaler_mean is not None:
+            self.scaler_mean = self.scaler_mean.to(dtype=torch.float32)
+        if self.scaler_std is not None:
+            self.scaler_std = self.scaler_std.to(dtype=torch.float32)
+        if self.pca_mean is not None:
+            self.pca_mean = self.pca_mean.to(dtype=torch.float32)
+        if self.pca_components is not None:
+            self.pca_components = self.pca_components.to(dtype=torch.float32)
 
     @property
     def is_regression(self) -> bool:
@@ -112,43 +112,6 @@ class LoadedProbe:
         if outputs.ndim == 1:
             outputs = outputs.unsqueeze(-1)
         return outputs
-
-    def run(self, vector: torch.Tensor) -> ProbeRunResult:
-        if vector.ndim != 1:
-            raise ValueError(
-                f"Probe expects a 1D activation vector, got shape {tuple(vector.shape)}"
-            )
-        if vector.shape[0] != self.input_dim:
-            raise ValueError(
-                f"Probe expects input dim {self.input_dim}, got {vector.shape[0]}"
-            )
-
-        batch = vector.detach().to(dtype=torch.float32, device="cpu").unsqueeze(0)
-        logits_batch, probs_batch = self._forward_batch(batch)
-        logits = logits_batch.squeeze(0)
-        probs = probs_batch.squeeze(0)
-        if logits.ndim == 0:
-            logits = logits.unsqueeze(0)
-        if probs.ndim == 0:
-            probs = probs.unsqueeze(0)
-
-        predicted_index = (
-            int(probs.item() >= 0.5)
-            if probs.numel() == 1
-            else int(torch.argmax(probs).item())
-        )
-        predicted_label = (
-            self.labels[predicted_index]
-            if 0 <= predicted_index < len(self.labels)
-            else None
-        )
-        return ProbeRunResult(
-            input_dim=int(vector.shape[0]),
-            logits=logits,
-            probabilities=probs,
-            predicted_index=predicted_index,
-            predicted_label=predicted_label,
-        )
 
     def run_batch(
         self, activations: torch.Tensor
@@ -188,8 +151,7 @@ class LoadedProbe:
 
     def _normalize_batch(self, batch: torch.Tensor) -> torch.Tensor:
         if self.scaler_mean is not None and self.scaler_std is not None:
-            mean = self.scaler_mean.to(dtype=torch.float32)
-            std = self.scaler_std.to(dtype=torch.float32)
+            mean, std = self.scaler_mean, self.scaler_std
             if mean.ndim != 1 or std.ndim != 1 or mean.shape[0] != batch.shape[1]:
                 raise ValueError(
                     "Probe scaler shape does not match activation hidden size: "
@@ -199,14 +161,12 @@ class LoadedProbe:
             safe_std = torch.where(std == 0, torch.ones_like(std), std)
             batch = (batch - mean) / safe_std
         if self.pca_mean is not None and self.pca_components is not None:
-            pca_mean = self.pca_mean.to(dtype=torch.float32)
-            components = self.pca_components.to(dtype=torch.float32)
-            if pca_mean.ndim != 1 or pca_mean.shape[0] != batch.shape[1]:
+            if self.pca_mean.ndim != 1 or self.pca_mean.shape[0] != batch.shape[1]:
                 raise ValueError(
                     "Probe PCA mean shape does not match activation hidden size: "
-                    f"mean={tuple(pca_mean.shape)} batch={tuple(batch.shape)}"
+                    f"mean={tuple(self.pca_mean.shape)} batch={tuple(batch.shape)}"
                 )
-            batch = (batch - pca_mean) @ components.T
+            batch = (batch - self.pca_mean) @ self.pca_components.T
         return batch
 
 

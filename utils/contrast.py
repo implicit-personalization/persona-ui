@@ -49,12 +49,10 @@ def _strip_special_ids(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return display ids and a mask that excludes special tokens."""
     ids = ids.cpu()
-    special_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
+    special_ids = sorted(getattr(tokenizer, "all_special_ids", []) or [])
     if not special_ids or ids.numel() == 0:
         return ids, torch.ones(ids.shape[0], dtype=torch.bool)
-    keep = torch.tensor(
-        [tid.item() not in special_ids for tid in ids], dtype=torch.bool
-    )
+    keep = ~torch.isin(ids, torch.tensor(special_ids, dtype=ids.dtype))
     return ids[keep], keep
 
 
@@ -67,9 +65,7 @@ def _prepare_trace_input_ids(
     context_prompt, _ = format_generation_prompt(context_messages, tokenizer)
     context_ids = tokenizer(context_prompt, return_tensors="pt").input_ids[0]
     input_ids = torch.cat([context_ids.cpu(), response_ids.detach().cpu()])
-    n_ctx = len(context_ids)
-    n_resp = len(response_ids)
-    return input_ids, n_ctx, n_resp
+    return input_ids, len(context_ids), len(response_ids)
 
 
 def _build_contrast(

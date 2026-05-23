@@ -88,42 +88,32 @@ def _select_personas(
     if not all_ids:
         st.info("No personas found for this variant.")
         return []
-    regular = all_ids
-    if len(regular) < 2:
+    if len(all_ids) < 2:
         st.info("At least two non-assistant personas are needed for probing.")
         return []
-    min_count = min(10, len(regular))
-    if min_count == len(regular):
-        count = len(regular)
+
+    min_count = min(10, len(all_ids))
+    has_slider = min_count < len(all_ids)
+    if has_slider:
+        default_count = max(
+            min_count,
+            min(len(all_ids), st.session_state.get("probe:persona_count", len(all_ids))),
+        )
+        count = st.slider(
+            "Personas",
+            min_value=min_count,
+            max_value=len(all_ids),
+            value=default_count,
+            key="probe:persona_count_slider",
+        )
+    else:
+        count = len(all_ids)
         st.warning(
             f"Only {count} non-assistant personas are available; using all of them."
         )
-        st.session_state["probe:persona_count"] = count
-        persona_ids = regular
-        persona_names_cached(
-            source,
-            location,
-            model_name,
-            mask_strategy.value,
-            (variant,),
-            tuple(persona_ids),
-        )
-        st.caption(f"Probing {len(persona_ids)} non-assistant personas.")
-        return persona_ids
 
-    default_count = min(
-        len(regular),
-        max(min_count, st.session_state.get("probe:persona_count", len(regular))),
-    )
-    count = st.slider(
-        "Personas",
-        min_value=min_count,
-        max_value=len(regular),
-        value=default_count,
-        key="probe:persona_count_slider",
-    )
     st.session_state["probe:persona_count"] = count
-    persona_ids = regular[:count]
+    persona_ids = all_ids[:count]
     persona_names_cached(
         source,
         location,
@@ -132,7 +122,12 @@ def _select_personas(
         (variant,),
         tuple(persona_ids),
     )
-    st.caption(f"Probing {len(persona_ids)} of {len(regular)} non-assistant personas.")
+    if has_slider:
+        st.caption(
+            f"Probing {len(persona_ids)} of {len(all_ids)} non-assistant personas."
+        )
+    else:
+        st.caption(f"Probing {len(persona_ids)} non-assistant personas.")
     return persona_ids
 
 

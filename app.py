@@ -5,7 +5,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from utils.analysis_sources import DEFAULT_COMPARE_MODEL, DEFAULT_HUB_REPO, SOURCE_HUB
-from utils.helpers import DATASET_SOURCES, session_key, widget_key
+from utils.helpers import DATASET_SOURCES, session_key
 from utils.preload import preload_once
 from utils.runtime import configured_ndif_api_key, list_remote_models
 from utils.theme import active_base, install_catppuccin_theme
@@ -53,67 +53,28 @@ _TAB_PRELOAD_FUNCTIONS = {
 def _hub_metadata_preload_calls() -> tuple[
     tuple[str, tuple[str, str, str, str | None]], ...
 ]:
-    calls: list[tuple[str, tuple[str, str, str, str | None]]] = []
+    """Warm Hub metadata for the currently-selected source, if any.
 
-    def add(repo: str, model: str, mask_strategy: str, variant: str | None) -> None:
-        calls.append(
-            (
-                "utils.analysis_sources:prefetch_hub_metadata",
-                (repo, model, mask_strategy, variant),
-            )
-        )
+    Reads only the shared ``source:*`` keys (written by ``utils.source_controls``)
+    so this stays a small, single-purpose preload. Per-tab divergence used to
+    matter when each tab picked its own model; the shared keys are now the
+    source of truth.
+    """
 
-    shared_source = st.session_state.get("source:last_source", SOURCE_HUB)
-    shared_mask_strategy = st.session_state.get(
-        "source:last_mask_strategy", "answer_mean"
+    if st.session_state.get("source:last_source", SOURCE_HUB) != SOURCE_HUB:
+        return ()
+    repo = st.session_state.get("source:hub_repo", DEFAULT_HUB_REPO)
+    model = st.session_state.get("source:hub_model", DEFAULT_COMPARE_MODEL)
+    mask_strategy = st.session_state.get("source:last_mask_strategy", "answer_mean")
+    variant = st.session_state.get("probe:variant") or st.session_state.get(
+        "analysis:last_projection_variant"
     )
-
-    analysis_source = st.session_state.get("analysis:last_source", shared_source)
-    if analysis_source == SOURCE_HUB:
-        repo = st.session_state.get(
-            "analysis:hub_repo",
-            st.session_state.get("source:hub_repo", DEFAULT_HUB_REPO),
-        )
-        mask_strategy = st.session_state.get(
-            "analysis:last_mask_strategy",
-            shared_mask_strategy,
-        )
-        model = st.session_state.get(
-            widget_key("load", "hub_model", repo, mask_strategy),
-            st.session_state.get(
-                "analysis:hub_model_fallback",
-                st.session_state.get("source:hub_model", DEFAULT_COMPARE_MODEL),
-            ),
-        )
-        variant = st.session_state.get(
-            "analysis:last_projection_variant",
-            st.session_state.get("analysis:last_similarity_variant"),
-        )
-        add(repo, model, mask_strategy, variant)
-
-    probe_source = st.session_state.get(widget_key("probe", "source"), shared_source)
-    if probe_source == SOURCE_HUB:
-        repo = st.session_state.get(
-            "probe:hub_repo",
-            st.session_state.get("source:hub_repo", DEFAULT_HUB_REPO),
-        )
-        mask_strategy = st.session_state.get(
-            "probe:last_mask_strategy",
-            shared_mask_strategy,
-        )
-        model = st.session_state.get(
-            widget_key("probe", "hub_model", repo, mask_strategy),
-            st.session_state.get(
-                "probe:hub_model_fallback",
-                st.session_state.get("source:hub_model", DEFAULT_COMPARE_MODEL),
-            ),
-        )
-        add(repo, model, mask_strategy, st.session_state.get("probe:variant"))
-
-    deduped: dict[tuple[str, tuple[str, str, str, str | None]], None] = {}
-    for call in calls:
-        deduped[call] = None
-    return tuple(deduped)
+    return (
+        (
+            "utils.analysis_sources:prefetch_hub_metadata",
+            (repo, model, mask_strategy, variant),
+        ),
+    )
 
 
 @dataclass(frozen=True)

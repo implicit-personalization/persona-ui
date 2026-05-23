@@ -113,7 +113,8 @@ def configured_ndif_api_key() -> str | None:
 def remote_backend(model: object, api_key: str | None = None, *, on_status=None):
     """Build an NDIF backend with credentials bound to one browser session."""
 
-    from nnsight.intervention.backends.remote import JobStatusDisplay, RemoteBackend
+    from nnsight.intervention.backends.remote import RemoteBackend
+    from persona_vectors.activations import CallbackJobStatusDisplay
 
     active_key = api_key or session_ndif_api_key() or configured_ndif_api_key()
     if not active_key:
@@ -121,24 +122,10 @@ def remote_backend(model: object, api_key: str | None = None, *, on_status=None)
 
     backend = RemoteBackend(model.to_model_key(), api_key=active_key)
     backend.CONNECT_TIMEOUT = 300.0
-    if on_status is None:
-        return backend
-
-    class _CallbackJobStatusDisplay(JobStatusDisplay):
-        def update(
-            self,
-            job_id: str = "",
-            status_name: str = "",
-            description: str = "",
-        ):
-            super().update(job_id, status_name, description)
-            if status_name:
-                on_status(job_id, status_name, description)
-
-    backend.status_display = _CallbackJobStatusDisplay(
-        enabled=True,
-        verbose=backend.verbose,
-    )
+    if on_status is not None:
+        backend.status_display = CallbackJobStatusDisplay(
+            on_status, enabled=True, verbose=backend.verbose
+        )
     return backend
 
 
