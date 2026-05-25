@@ -49,7 +49,15 @@ def test_cached_sweep_keeps_per_attribute_samples_and_full_plus_pca(monkeypatch)
         filtered,
     )
 
-    def sweep(input_samples, labels, *, layers, probe_kinds, n_pca_components, seed):
+    def sweep(
+        input_samples,
+        labels,
+        *,
+        layers,
+        probe_kinds,
+        n_pca_components,
+        seed,
+    ):
         assert input_samples is samples
         assert layers == [0, 1]
         assert probe_kinds == ["logistic_regression"]

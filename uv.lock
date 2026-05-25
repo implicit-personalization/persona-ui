@@ -1608,7 +1608,7 @@ requires-dist = [
     { name = "catppuccin", specifier = ">=2.5.0" },
     { name = "datasets", specifier = ">=4.8.5" },
     { name = "huggingface-hub", specifier = ">=1.14.0" },
-    { name = "persona-vectors", specifier = ">=0.8.7" },
+    { name = "persona-vectors", specifier = ">=0.8.9" },
     { name = "plotly", specifier = ">=6.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "safetensors", specifier = ">=0.7.0" },
@@ -1620,7 +1620,7 @@ dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "persona-vectors"
-version = "0.8.7"
+version = "0.8.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "datasets" },
@@ -1639,9 +1639,9 @@ dependencies = [
     { name = "transformers" },
     { name = "umap-learn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/25/92/2d8a021cabfb23cbc7fd79cc1140607e424283bae324177ee3c54c673a7d/persona_vectors-0.8.7.tar.gz", hash = "sha256:ffc92effdaecb38d06a107a6690c47ce0a891ae86fb3ffbfba390c9e2ca59714", size = 43667, upload-time = "2026-05-23T09:48:37.504Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b8/2f/a7ac3d5c3b9bfa2150dba19b4317d5e74c1e284a4e43c55d75f8fe140444/persona_vectors-0.8.9.tar.gz", hash = "sha256:84056f4b0cfacc068d05ffff9349384f773717477e347680a2c685a312aac462", size = 43994, upload-time = "2026-05-25T11:37:33.592Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/51/976d72e4a98fce3cdd058862adb879d7400aff9459d2f4af9a9cffde8c33/persona_vectors-0.8.7-py3-none-any.whl", hash = "sha256:ba5a0fb3f81b2750b82960f07700c223f07c31bc215ae3ab67fbd1f9d200419f", size = 53636, upload-time = "2026-05-23T09:48:36.554Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/c3/2322bd2c341fcb175db5e946e51b8a91c6b25b41b299dd7b6eaa70d50e86/persona_vectors-0.8.9-py3-none-any.whl", hash = "sha256:5abe0f97787a21c6fd747aa3cf5213214ba18e4cf92a89159e986c7547beef79", size = 53905, upload-time = "2026-05-25T11:37:34.75Z" },
 ]
 
 [[package]]
@@ -2672,15 +2672,15 @@ wheels = [
 
 [[package]]
 name = "starlette"
-version = "1.0.1"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/08/a3/84e821cc54b4ab50ae6dbc6ac3800a651b65ec35f045cc73785380654057/starlette-1.0.1.tar.gz", hash = "sha256:512399c5f1de7fac99c88572212ded9ddeddef2fb32afa82d724000e88b38f4f", size = 2659596, upload-time = "2026-05-21T21:58:58.433Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/95/66/4d20cdf39a8d6a51e663b7038e3b828ff211d3891a43a713fe7e4643f3a8/starlette-1.1.0.tar.gz", hash = "sha256:e83c7fe0ddecd8719c5b840080325aec0260acec86e9832899e377b91d65e90f", size = 2660060, upload-time = "2026-05-23T16:55:41.376Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/e1/b2df4bc09a1e51ff664c1e17018a4274b42e5e9352e4a478ea540512dc88/starlette-1.0.1-py3-none-any.whl", hash = "sha256:7c0e69b2ee1c848bd54669d908500117a3ee13de603a21427e5c6fc1adf98dcd", size = 72802, upload-time = "2026-05-21T21:58:56.551Z" },
+    { url = "https://files.pythonhosted.org/packages/93/79/920b8e0a8b20f793e8d64855095cb8febabf6175b8550b6f7a547d813891/starlette-1.1.0-py3-none-any.whl", hash = "sha256:7f0dfd38e428aad5cb6f9f667f0ca1d2d8ca3f3385dccac8305f79ec98458382", size = 72899, upload-time = "2026-05-23T16:55:39.201Z" },
 ]
 
 [[package]]
@@ -2990,15 +2990,15 @@ wheels = [
 
 [[package]]
 name = "uvicorn"
-version = "0.47.0"
+version = "0.48.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "h11" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f6/b1/8e7077a8641086aea449e1b5752a570f1b5906c64e0a33cd6d93b63a066b/uvicorn-0.47.0.tar.gz", hash = "sha256:7c9a0ea1a9414106bbab7324609c162d8fa0cdcdcb703060987269d77c7bb533", size = 90582, upload-time = "2026-05-14T18:16:54.455Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e6/bf/f6544ba992ddb9a6077343a576f9844f7f8f06ab819aefd00206e9255f18/uvicorn-0.48.0.tar.gz", hash = "sha256:a5504207195d08c2511bf9125ede5ac4a4b71725d519e758d01dcf0bc2d31c37", size = 91074, upload-time = "2026-05-24T12:08:41.925Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/41/ac2dfdbc1f60c7af4f994c7a335cfa7040c01642b605d65f611cecc2a1e4/uvicorn-0.47.0-py3-none-any.whl", hash = "sha256:2c5715bc12d1892d84752049f400cd1c3cb018514967fdfeb97640443a6a9432", size = 71301, upload-time = "2026-05-14T18:16:51.762Z" },
+    { url = "https://files.pythonhosted.org/packages/01/be/72532be3da7acc5fdfbccdb95215cd04f995a0886532a5b423f929cda4cc/uvicorn-0.48.0-py3-none-any.whl", hash = "sha256:48097851328b87ec36117d3d575234519eb58c2b22d79666e9bbc6c49a761dad", size = 71410, upload-time = "2026-05-24T12:08:40.258Z" },
 ]
 
 [[package]]

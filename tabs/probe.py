@@ -97,7 +97,9 @@ def _select_personas(
     if has_slider:
         default_count = max(
             min_count,
-            min(len(all_ids), st.session_state.get("probe:persona_count", len(all_ids))),
+            min(
+                len(all_ids), st.session_state.get("probe:persona_count", len(all_ids))
+            ),
         )
         count = st.slider(
             "Personas",
