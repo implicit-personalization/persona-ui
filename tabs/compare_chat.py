@@ -27,6 +27,7 @@ from .chat_ui import (
 if TYPE_CHECKING:
     from nnterp import StandardizedTransformer
     from persona_data.synth_persona import PersonaData
+    from persona_vectors.steer_generate import SteeringSpec
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,8 @@ class ComparePanel:
     prompt_key: str
     edit_key: str
     pending_key: str
+    prompt_mode: str
+    steering: SteeringSpec | None = None
 
 
 def _get_compare_state(context_key: str, side: str) -> tuple[str, ChatState]:
@@ -64,6 +67,7 @@ def _render_compare_panel(
     context_key: str,
     side: str,
     personas: list[PersonaData],
+    steering: SteeringSpec | None = None,
 ) -> ComparePanel:
     panel_key, state = _get_compare_state(context_key, side)
 
@@ -71,6 +75,7 @@ def _render_compare_panel(
     edit_key = widget_key(panel_key, "edit_idx")
     pending_key = widget_key(panel_key, "pending_regen")
 
+    # Each panel (including the steered one) gets its own persona + prompt selectors.
     persist_persona_key = session_key("chat", f"last_cmp_{side}_persona")
     persist_prompt_key = session_key("chat", f"last_cmp_{side}_prompt")
     hydrate_chat_state(
@@ -78,7 +83,6 @@ def _render_compare_panel(
         persisted_persona_key=persist_persona_key,
         persisted_prompt_key=persist_prompt_key,
     )
-
     selection = render_chat_selection(
         personas,
         state["persona_id"],
@@ -130,6 +134,8 @@ def _render_compare_panel(
         prompt_key=prompt_key,
         edit_key=edit_key,
         pending_key=pending_key,
+        prompt_mode=prompt_mode,
+        steering=steering,
     )
 
 
@@ -174,6 +180,7 @@ def _generate_panels(
                 generation=generation,
                 on_status=_show_ndif_status if remote else None,
                 ndif_api_key=session_ndif_api_key(),
+                steering=panel.steering,
             )
             results.append(reply if error is None else error)
     status_box.empty()
@@ -297,7 +304,7 @@ def _render_compare_footer(
 
     footer = st.container()
     with footer:
-        exp_col, rst_col, _spacer = st.columns([1, 1.25, 20], gap="xsmall")
+        exp_col, rst_col, _spacer = st.columns([1, 1.25, 22.5], gap="xsmall")
         with exp_col:
             if st.button(
                 "",
@@ -395,20 +402,47 @@ def _render_compare_panels(
     *,
     context_key: str,
     personas: list[PersonaData],
+    steering: SteeringSpec | None = None,
 ) -> list[ComparePanel]:
+    steered = steering is not None
     left_col, right_col = st.columns(2)
     with left_col:
+        if steered:
+            st.caption("Baseline — no steering")
         left = _render_compare_panel(
             context_key=context_key,
             side="left",
             personas=personas,
         )
     with right_col:
-        right = _render_compare_panel(
-            context_key=context_key,
-            side="right",
-            personas=personas,
+        if not steered:
+            right = _render_compare_panel(
+                context_key=context_key,
+                side="right",
+                personas=personas,
+            )
+            return [left, right]
+        # Default the steered panel to the baseline's persona/prompt on first use;
+        # its own selectors still let it be changed independently.
+        st.session_state.setdefault(
+            session_key("chat", "last_cmp_right_persona"), left.persona.id
         )
+        st.session_state.setdefault(
+            session_key("chat", "last_cmp_right_prompt"), left.prompt_mode
+        )
+        # Red-tinted bordered box marks the steered panel at a glance.
+        st.html(
+            "<style>.st-key-steered_panel{border:1px solid rgba(255,75,75,.45)!important;"
+            "border-radius:.5rem;background:rgba(255,75,75,.035);}</style>"
+        )
+        with st.container(border=True, key="steered_panel"):
+            st.markdown(":red[**🎯 Steered**] — axis added during generation")
+            right = _render_compare_panel(
+                context_key=context_key,
+                side="right",
+                personas=personas,
+                steering=steering,
+            )
     return [left, right]
 
 
@@ -421,10 +455,15 @@ def render_compare_mode(
     generation: GenerationConfig,
     *,
     contrast_enabled: bool,
+    steering: SteeringSpec | None = None,
 ) -> None:
     """Render the full side-by-side comparison UI."""
 
-    panels = _render_compare_panels(context_key=context_key, personas=personas)
+    panels = _render_compare_panels(
+        context_key=context_key,
+        personas=personas,
+        steering=steering,
+    )
 
     regen_panels = [
         panel for panel in panels if st.session_state.pop(panel.pending_key, False)

@@ -55,7 +55,7 @@ def _render_single_chat_footer(
 ) -> None:
     footer = st.container()
     with footer:
-        exp_col, rst_col, _spacer = st.columns([0.5, 0.5, 10], gap="xsmall")
+        exp_col, rst_col, _spacer = st.columns([0.5, 0.5, 12.5], gap="xsmall")
         with exp_col:
             if st.button(
                 "",
@@ -92,6 +92,7 @@ def _handle_single_chat_generation(
     chat_state: ChatState,
     active_system_prompt: str | None,
     generation: GenerationConfig,
+    steering,
     pending_action: PendingChatAction,
     chat_log,
 ) -> None:
@@ -130,6 +131,7 @@ def _handle_single_chat_generation(
             on_status=_show_ndif_status if remote else None,
             on_error=_show_error,
             ndif_api_key=session_ndif_api_key(),
+            steering=steering,
         )
         if error is not None:
             status_box.empty()
@@ -166,6 +168,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
     generation, tools = render_advanced_settings(
         context_key,
         remote,
+        model_name,
         last_compare_mode_key=_LAST_COMPARE_MODE_KEY,
         last_probe_enabled_key=_LAST_PROBE_ENABLED_KEY,
         last_token_contrast_key=_LAST_TOKEN_CONTRAST_KEY,
@@ -181,6 +184,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
             personas,
             generation,
             contrast_enabled=tools.token_contrast,
+            steering=tools.steering,
         )
         return
 
@@ -304,6 +308,7 @@ def render_chat_tab(remote: bool, model_name: str, dataset_source: str) -> None:
         chat_state=chat_state,
         active_system_prompt=active_system_prompt,
         generation=generation,
+        steering=tools.steering,
         pending_action=pending_action,
         chat_log=chat_log,
     )

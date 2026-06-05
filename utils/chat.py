@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     import torch
     from nnterp import StandardizedTransformer
     from persona_data.synth_persona import PersonaData
+    from persona_vectors.steer_generate import SteeringSpec
 
 logger = logging.getLogger(__name__)
 SystemPromptMode = Literal["empty", "templated", "biography", "custom"]
@@ -188,6 +189,7 @@ def generate_chat_reply(
     seed: int | None = None,
     on_status: Callable[[str, str, str], None] | None = None,
     ndif_api_key: str | None = None,
+    steering: SteeringSpec | None = None,
 ) -> ChatReply:
     """Generate one assistant reply from a full chat history.
 
@@ -230,24 +232,66 @@ def generate_chat_reply(
     if repetition_penalty != 1.0:
         generation_kwargs["repetition_penalty"] = repetition_penalty
     # `remote` is captured by nnsight's RemoteableMixin.trace() and is NOT
-    # forwarded to the underlying model's generate
+    # forwarded to the underlying model's generate.
+    #
+    # Use nnsight's *default* remote backend (set the API key globally) rather
+    # than a custom RemoteBackend: passing one drops the result of steered traces
+    # (model.generator.output comes back None even though the NDIF job completes).
+    # This matches the proven persona_vectors.generate_steered path.
     if remote:
-        from utils.runtime import remote_backend
+        from nnsight import CONFIG
+        from utils.runtime import configured_ndif_api_key, session_ndif_api_key
 
-        backend = remote_backend(model, ndif_api_key, on_status=on_status)
-    else:
-        backend = None
+        active_key = ndif_api_key or session_ndif_api_key() or configured_ndif_api_key()
+        if not active_key:
+            raise RuntimeError("Enter your NDIF API key before using remote execution.")
+        CONFIG.API.APIKEY = active_key
+    backend = None
 
-    with (
-        _seeded_rng(seed if do_sample and not remote else None),
-        model.generate(
+    # Steered generation delegates to persona_vectors' single-pass primitive: a
+    # bare `model.generate` block with no enclosing context manager and no explicit
+    # `use_cache`, which steered remote traces require — otherwise NDIF returns no
+    # result. Greedy decode (sampling kwargs don't apply when steering).
+    if steering is not None and steering.coefficient:
+        from persona_vectors.steer_generate import generate_steered_once
+
+        out = generate_steered_once(
+            model,
+            prompt,
+            layer=steering.layer,
+            steering_vector=steering.vector,
+            factor=float(steering.coefficient),
+            remote=remote,
+            backend=backend,
+            max_new_tokens=max_new_tokens,
+        )
+        generated_ids = out[0][prompt_token_count:]
+        text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+        return ChatReply(text=text, generated_ids=generated_ids.detach().cpu())
+
+    # nnsight's trace context swallows exceptions raised inside the block (e.g.
+    # from a failed remote job). Initialize to None and check after, so the real
+    # failure surfaces instead of an UnboundLocalError.
+    generated = None
+    # Keep `with model.generate(...)` as a standalone statement (not a
+    # parenthesized multi-context `with`): nnsight's source-based tracer parses
+    # the with-block, and the tuple form can break body capture.
+    with _seeded_rng(seed if do_sample and not remote else None):
+        with model.generate(
             prompt,
             remote=remote,
             backend=backend,
             **generation_kwargs,
-        ) as tracer,
-    ):
-        generated = tracer.result.save()
+        ) as tracer:
+            # Use model.generator.output (the proven persona_vectors.generate_steered
+            # pattern) rather than tracer.result: the latter returns None from NDIF.
+            generated = model.generator.output.save()
+
+    if generated is None:
+        raise RuntimeError(
+            "Generation produced no result; the trace failed inside nnsight "
+            f"(remote={remote})."
+        )
 
     if getattr(generated, "value", None) is not None:
         generated = generated.value

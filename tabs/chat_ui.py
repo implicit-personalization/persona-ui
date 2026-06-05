@@ -16,6 +16,7 @@ from utils.helpers import (
 
 if TYPE_CHECKING:
     from persona_data.synth_persona import PersonaData
+    from persona_vectors.steer_generate import SteeringSpec
 
     from utils.contrast import TokenContrast
 
@@ -75,6 +76,7 @@ class ChatTools:
     probe_enabled: bool
     compare_mode: bool
     token_contrast: bool
+    steering: SteeringSpec | None
 
 
 @st.dialog("Edit", width="medium")
@@ -145,6 +147,7 @@ def _open_system_prompt_dialog(
 def render_advanced_settings(
     context_key: str,
     remote: bool,
+    model_name: str,
     *,
     last_compare_mode_key: str,
     last_probe_enabled_key: str = "",
@@ -169,8 +172,10 @@ def render_advanced_settings(
             last_token_contrast_key, False
         )
 
+    steering_key = widget_key(context_key, "steering_enabled")
+
     with st.expander("Chat tools", expanded=False):
-        tools_col1, tools_col2, tools_col3 = st.columns(3)
+        tools_col1, tools_col2, tools_col3, tools_col4 = st.columns(4)
         with tools_col1:
             probe_enabled = st.toggle(
                 "Probe",
@@ -195,6 +200,22 @@ def render_advanced_settings(
                     "Available only in Compare mode."
                 ),
             )
+        with tools_col4:
+            steering_enabled = st.toggle(
+                "Steering",
+                key=steering_key,
+                help=(
+                    "Add a persona-attribute axis (age, education, sex, wealth, "
+                    "politics) to generation. In single chat it steers the reply; in "
+                    "Compare mode only the right panel is steered (left stays baseline)."
+                ),
+            )
+
+        steering = None
+        if steering_enabled:
+            from utils.steering import render_steering_controls
+
+            steering = render_steering_controls(context_key, model_name)
 
     st.session_state[last_compare_mode_key] = compare_mode
     if last_probe_enabled_key:
@@ -209,6 +230,7 @@ def render_advanced_settings(
         probe_enabled=probe_enabled,
         compare_mode=compare_mode,
         token_contrast=token_contrast and compare_mode,
+        steering=steering,
     )
     return generation, tools
 
