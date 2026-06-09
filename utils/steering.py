@@ -23,10 +23,12 @@ from persona_vectors.steer_generate import (
 from utils.helpers import widget_key
 
 STEER_REPO = "implicit-personalization/synth-persona-vectors"
-# Measured causal-sign flips: the difference-of-means axis decodes the attribute
-# well but steers the opposite way for these (read != write polarity). Default the
-# UI's flip toggle from this; the user can override per layer.
-STEER_SIGN_CAL = {"age": -1.0}
+# Per-attribute causal-sign flips. The difference-of-means axis is causally correct
+# as-is — +coefficient steers toward the labelled direction (verified for age in
+# generation + MCQ) — so this is empty by default. Add an entry only if an axis is
+# measured to decode an attribute but steer the opposite way. The UI flip toggle
+# defaults from this and the user can override per layer.
+STEER_SIGN_CAL: dict[str, float] = {}
 # Persona attributes that form a single signed steering axis. Binary and
 # numeric/ordinal attributes split naturally; categorical attributes use a
 # one-vs-rest contrast against their modal class (handled in
